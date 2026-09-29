@@ -5,7 +5,7 @@ using UnityEngine;
 namespace BoardGame.View
 {
     /// <summary>
-    /// Shows the session's score, move count and cascade combo. Text is written with
+    /// Shows the score against the level target, the moves left and the cascade combo. Text is written with
     /// <see cref="TMP_Text.SetText(string, float)"/>, which formats numbers without allocating strings.
     /// </summary>
     public sealed class HudView : MonoBehaviour
@@ -17,6 +17,7 @@ namespace BoardGame.View
         [SerializeField] private TMP_Text _comboText;
 
         private ScoreKeeper _score;
+        private LevelState _level;
 
         // Start, not Awake: BoardView creates the ScoreKeeper in its own Awake.
         private void Start()
@@ -29,6 +30,7 @@ namespace BoardGame.View
             }
 
             _score = _boardView.Score;
+            _level = _boardView.Level;
             _score.OnChanged += Refresh;
             Refresh();
         }
@@ -40,11 +42,12 @@ namespace BoardGame.View
 
         private void Refresh()
         {
-            _scoreText.SetText("Score {0}", _score.Score);
-            _movesText.SetText("Moves {0}", _score.Moves);
+            // Float arguments pick the formatting overload; (ReadOnlySpan<char>, int, int) would be a substring.
+            _scoreText.SetText("Score {0} / {1}", (float)_score.Score, (float)_level.TargetScore);
+            _movesText.SetText("Moves left {0}", (float)_level.MovesLeft);
 
             bool showCombo = _score.Combo >= 2;
-            if (showCombo) _comboText.SetText("Combo x{0}", _score.Combo);
+            if (showCombo) _comboText.SetText("Combo x{0}", (float)_score.Combo);
             _comboText.enabled = showCombo;
         }
     }

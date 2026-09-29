@@ -29,6 +29,10 @@ namespace BoardGame.View
             new Color(0.61f, 0.35f, 0.71f), // purple
         };
 
+        [Header("Level")]
+        [SerializeField, Min(1)] private int _moveLimit = 20;
+        [SerializeField, Min(1)] private int _targetScore = 2500;
+
         [Header("Presentation")]
         [SerializeField] private PieceView _piecePrefab;
         [SerializeField, Min(0.01f)] private float _cellSize = 1f;
@@ -47,6 +51,9 @@ namespace BoardGame.View
 
         /// <summary>Score of the running session; created in Awake, so read it from Start onwards.</summary>
         public ScoreKeeper Score { get; private set; }
+
+        /// <summary>Move limit, target and outcome of the running level; created in Awake, like <see cref="Score"/>.</summary>
+        public LevelState Level { get; private set; }
 
         private Board _board;
         private Transform _transform;
@@ -85,6 +92,7 @@ namespace BoardGame.View
             int seed = _seed != 0 ? _seed : Environment.TickCount;
             _board = new Board(_width, _height, new BoardGenerator(_pieceColors.Length, seed));
             Score = new ScoreKeeper(_board);
+            Level = new LevelState(_board, Score, _moveLimit, _targetScore);
 
             int cellCount = _board.CellCount;
             _viewsByCell = new PieceView[cellCount];
@@ -113,6 +121,7 @@ namespace BoardGame.View
         private void OnDestroy()
         {
             if (_board == null) return;
+            Level.Dispose();
             Score.Dispose();
             _board.OnPiecesSwapped -= HandlePiecesSwapped;
             _board.OnPieceMoved -= HandlePieceMoved;
@@ -133,6 +142,13 @@ namespace BoardGame.View
                 // Fresh spawn stacks per collapse step, so each wave of refills drops in from just above the board.
                 Array.Clear(_spawnRowOffset, 0, _spawnRowOffset.Length);
                 _board.ResolveStep();
+                return;
+            }
+
+            if (!Level.CanMove)
+            {
+                _isSwiping = false; // Level over: the board stays on screen but takes no more input.
+                StopHint();
                 return;
             }
 
