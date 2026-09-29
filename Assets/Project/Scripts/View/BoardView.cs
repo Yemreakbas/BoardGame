@@ -50,7 +50,8 @@ namespace BoardGame.View
         private PieceView[] _viewsByCell;    // cell index -> view showing that cell's piece
         private PieceView[] _hiddenViews;    // stack of views released by matches, reused by refills
         private int _hiddenCount;
-        private int[] _spawnRowOffset;       // per column: refills already stacked above the board this swap
+        private int[] _spawnRowOffset;       // per column: refills already stacked above the board this step
+        private PieceView[] _shuffleScratch; // copy of _viewsByCell while a shuffle remaps it
         private float _fittedAspect;         // camera aspect the fit was computed for; 0 forces a refit
 
         private bool _isSwiping;
@@ -79,6 +80,7 @@ namespace BoardGame.View
             _viewsByCell = new PieceView[cellCount];
             _hiddenViews = new PieceView[cellCount];
             _spawnRowOffset = new int[_board.Width];
+            _shuffleScratch = new PieceView[cellCount];
             _cellOrigin = new Vector3(-0.5f * (_board.Width - 1) * _cellSize, -0.5f * (_board.Height - 1) * _cellSize, 0f);
 
             // The only instantiation in the game: one view per cell, recycled from here on.
@@ -93,6 +95,7 @@ namespace BoardGame.View
             _board.OnPieceMoved += HandlePieceMoved;
             _board.OnMatched += HandleMatched;
             _board.OnPieceSpawned += HandlePieceSpawned;
+            _board.OnShuffled += HandleShuffled;
 
             FitCamera();
         }
@@ -104,6 +107,7 @@ namespace BoardGame.View
             _board.OnPieceMoved -= HandlePieceMoved;
             _board.OnMatched -= HandleMatched;
             _board.OnPieceSpawned -= HandlePieceSpawned;
+            _board.OnShuffled -= HandleShuffled;
         }
 
         private void Update()
@@ -215,6 +219,20 @@ namespace BoardGame.View
             int spawnRow = _board.Height + _spawnRowOffset[x]++;
             view.Show(ColorOf(pieceId), CellToLocal(x, spawnRow));
             view.MoveTo(CellToLocal(index));
+        }
+
+        // Every piece flies from its old cell to its new one. Colors are refreshed too, because a shuffle
+        // that fell back to regenerating the board changes piece IDs.
+        private void HandleShuffled(ReadOnlySpan<int> sourceIndices)
+        {
+            Array.Copy(_viewsByCell, _shuffleScratch, _viewsByCell.Length);
+            for (int index = 0; index < sourceIndices.Length; index++)
+            {
+                PieceView view = _shuffleScratch[sourceIndices[index]];
+                _viewsByCell[index] = view;
+                view.SetColor(ColorOf(_board.GetPiece(index)));
+                view.MoveTo(CellToLocal(index));
+            }
         }
 
         // Board cells are empty (null) between a clear step and its refill; popping views sit in the hidden stack.

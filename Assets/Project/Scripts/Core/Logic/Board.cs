@@ -7,6 +7,11 @@ namespace BoardGame.Core.Logic
     public delegate void MatchedHandler(ReadOnlySpan<int> matchedIndices);
 
     /// <summary>
+    /// Receives a shuffle as, for each cell, the index its piece came from. The span is only valid during the call.
+    /// </summary>
+    public delegate void ShuffledHandler(ReadOnlySpan<int> sourceIndices);
+
+    /// <summary>
     /// Authoritative match-3 state: a flat, row-major array of piece IDs
     /// (index = y * Width + x, y = 0 is the bottom row, 0 is <see cref="Empty"/>).
     /// Owns the swap / match / collapse / refill rules and reports every change through events.
@@ -28,9 +33,20 @@ namespace BoardGame.Core.Logic
         /// <summary>A refill placed a new piece: (index, pieceId).</summary>
         public event Action<int, int> OnPieceSpawned;
 
+        /// <summary>
+        /// The settled board had no possible move, so its pieces were rearranged. If no shuffle of the same
+        /// pieces worked, the board was regenerated and some piece IDs changed: read them back from the board.
+        /// </summary>
+        public event ShuffledHandler OnShuffled;
+
+        /// <summary>Shuffles tried before falling back to regenerating the board.</summary>
+        private const int MaxShuffleAttempts = 100;
+
         private readonly int[] _cells;
+        private readonly int[] _shuffleSources;
         private readonly BoardGenerator _generator;
         private bool _hasHoles; // Matches were cleared; the next step collapses and refills.
+        private bool _shuffledThisResolve;
 
         public int Width { get; }
         public int Height { get; }
@@ -48,7 +64,9 @@ namespace BoardGame.Core.Logic
             Width = width;
             Height = height;
             _cells = new int[cellCount];
+            _shuffleSources = new int[cellCount];
             _generator.Fill(_cells, width, height);
+            if (!FindPossibleMove(out _, out _)) Shuffle(); // Nobody listens yet, so this is silent.
         }
 
         public int ToIndex(int x, int y) => y * Width + x;
@@ -58,6 +76,12 @@ namespace BoardGame.Core.Logic
 
         public int GetPiece(int index) => _cells[index];
         public int GetPiece(int x, int y) => _cells[ToIndex(x, y)];
+
+        /// <summary>Finds one swap that would create a match (e.g. for a hint). Only meaningful while not resolving.</summary>
+        public bool FindPossibleMove(out int indexA, out int indexB)
+        {
+            return MatchDetector.FindPossibleMove(_cells, Width, Height, out indexA, out indexB);
+        }
 
         /// <summary>
         /// True from an accepted <see cref="Swap"/> until <see cref="ResolveStep"/> reports the board stable.
@@ -116,6 +140,17 @@ namespace BoardGame.Core.Logic
             int matchCount = MatchDetector.FindMatches(_cells, Width, Height);
             if (matchCount == 0)
             {
+                // Settled. A dead board gets one shuffle step (never a second: a board too small to ever
+                // have a move would otherwise shuffle forever).
+                if (!_shuffledThisResolve && !FindPossibleMove(out _, out _))
+                {
+                    _shuffledThisResolve = true;
+                    Shuffle();
+                    OnShuffled?.Invoke(_shuffleSources.AsSpan(0, _cells.Length));
+                    return true;
+                }
+
+                _shuffledThisResolve = false;
                 IsResolving = false;
                 return false;
             }
@@ -171,6 +206,28 @@ namespace BoardGame.Core.Logic
                 _cells[index] = piece;
                 OnPieceSpawned?.Invoke(index, piece);
             }
+        }
+
+        // Rearranges the pieces into a layout with no match and at least one move, recording in
+        // _shuffleSources where each cell's piece came from. Falls back to fresh boards (which never start
+        // with a match) if shuffling keeps failing, e.g. when one piece type dominates the board.
+        private void Shuffle()
+        {
+            int cellCount = _cells.Length;
+            for (int i = 0; i < cellCount; i++) _shuffleSources[i] = i;
+
+            for (int attempt = 0; attempt < MaxShuffleAttempts; attempt++)
+            {
+                _generator.Shuffle(_cells, _shuffleSources, cellCount);
+                if (MatchDetector.FindMatches(_cells, Width, Height) == 0 && FindPossibleMove(out _, out _)) return;
+            }
+
+            for (int attempt = 0; attempt < MaxShuffleAttempts; attempt++)
+            {
+                _generator.Fill(_cells, Width, Height);
+                if (FindPossibleMove(out _, out _)) return;
+            }
+            // Still no move: the board is too small to ever have one. Leave the last match-free fill.
         }
 
         private void Exchange(int a, int b)

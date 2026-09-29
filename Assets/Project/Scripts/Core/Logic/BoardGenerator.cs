@@ -62,6 +62,26 @@ namespace BoardGame.Core.Logic
             return _random.Next(FirstPieceId, FirstPieceId + PieceTypeCount);
         }
 
+        /// <summary>
+        /// Fisher-Yates shuffle of the pieces in <paramref name="cells"/>, applying the same exchanges to
+        /// <paramref name="sourceIndices"/> so it keeps recording where each cell's piece came from.
+        /// </summary>
+        public void Shuffle(int[] cells, int[] sourceIndices, int cellCount)
+        {
+            for (int i = cellCount - 1; i > 0; i--)
+            {
+                int j = _random.Next(i + 1);
+
+                int piece = cells[i];
+                cells[i] = cells[j];
+                cells[j] = piece;
+
+                int source = sourceIndices[i];
+                sourceIndices[i] = sourceIndices[j];
+                sourceIndices[j] = source;
+            }
+        }
+
         // Uniform draw among the IDs that are neither excludedA nor excludedB (Board.Empty excludes nothing).
         private int NextPieceExcluding(int excludedA, int excludedB)
         {

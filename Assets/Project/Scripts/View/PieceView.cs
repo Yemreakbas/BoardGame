@@ -44,6 +44,9 @@ namespace BoardGame.View
             enabled = false;
         }
 
+        /// <summary>Changes the look without moving the view.</summary>
+        public void SetColor(Color color) => _renderer.color = color;
+
         /// <summary>Shrinks the view away, then deactivates it until a refill reuses it.</summary>
         public void Pop()
         {
