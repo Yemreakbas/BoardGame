@@ -8,7 +8,9 @@ namespace BoardGame.View
     /// <summary>
     /// Unity-side mirror of a <see cref="Board"/>. Awake builds the board and every <see cref="PieceView"/> it
     /// will ever need; afterwards the view only reacts to board events and turns pointer swipes (mouse in the
-    /// editor, touch on device) into <see cref="Board.Swap"/> calls. Nothing here allocates after Awake.
+    /// editor, touch on device) into <see cref="Board.Swap"/> calls. After an accepted swap it paces the board
+    /// with <see cref="Board.ResolveStep"/>, one step each time every piece has finished animating, so pops,
+    /// falls and cascades play in sequence. Nothing here allocates after Awake.
     /// </summary>
     public sealed class BoardView : MonoBehaviour
     {
@@ -30,6 +32,10 @@ namespace BoardGame.View
         [Header("Presentation")]
         [SerializeField] private PieceView _piecePrefab;
         [SerializeField, Min(0.01f)] private float _cellSize = 1f;
+        [Tooltip("Keeps an orthographic camera centred on the board and zoomed to fit it on any aspect ratio.")]
+        [SerializeField] private bool _fitCamera = true;
+        [Tooltip("Empty space kept around the board when fitting the camera, in cells.")]
+        [SerializeField, Min(0f)] private float _fitPadding = 0.5f;
 
         [Header("Input")]
         [Tooltip("Falls back to Camera.main when empty.")]
@@ -45,6 +51,7 @@ namespace BoardGame.View
         private PieceView[] _hiddenViews;    // stack of views released by matches, reused by refills
         private int _hiddenCount;
         private int[] _spawnRowOffset;       // per column: refills already stacked above the board this swap
+        private float _fittedAspect;         // camera aspect the fit was computed for; 0 forces a refit
 
         private bool _isSwiping;
         private int _swipeX;
@@ -86,6 +93,8 @@ namespace BoardGame.View
             _board.OnPieceMoved += HandlePieceMoved;
             _board.OnMatched += HandleMatched;
             _board.OnPieceSpawned += HandlePieceSpawned;
+
+            FitCamera();
         }
 
         private void OnDestroy()
@@ -99,6 +108,19 @@ namespace BoardGame.View
 
         private void Update()
         {
+            if (_fitCamera && _camera.aspect != _fittedAspect) FitCamera(); // Rotation or window resize.
+
+            if (_board.IsResolving)
+            {
+                _isSwiping = false;
+                if (IsAnyPieceBusy()) return;
+
+                // Fresh spawn stacks per collapse step, so each wave of refills drops in from just above the board.
+                Array.Clear(_spawnRowOffset, 0, _spawnRowOffset.Length);
+                _board.ResolveStep();
+                return;
+            }
+
             Pointer pointer = Pointer.current; // Last used mouse, pen or touchscreen.
             if (pointer == null) return;
 
@@ -116,7 +138,7 @@ namespace BoardGame.View
         private void BeginSwipe(Vector2 screenPosition)
         {
             _isSwiping = false;
-            if (IsAnyPieceMoving()) return; // Let the board settle before taking new input.
+            if (IsAnyPieceBusy()) return; // Let the board settle before taking new input.
 
             Vector2 local = ScreenToLocal(screenPosition);
             int x = Mathf.FloorToInt((local.x - _cellOrigin.x) / _cellSize + 0.5f);
@@ -143,8 +165,14 @@ namespace BoardGame.View
             if (absX >= absY) targetX += drag.x > 0f ? 1 : -1;
             else targetY += drag.y > 0f ? 1 : -1;
 
-            Array.Clear(_spawnRowOffset, 0, _spawnRowOffset.Length);
-            _board.Swap(_swipeX, _swipeY, targetX, targetY); // False (no match, or off the board) changes nothing.
+            if (_board.Swap(_swipeX, _swipeY, targetX, targetY)) return;
+
+            // Rejected (no match): show the attempt by bouncing both pieces. Off-board swipes do nothing.
+            if (!_board.IsInside(targetX, targetY)) return;
+            int indexA = _board.ToIndex(_swipeX, _swipeY);
+            int indexB = _board.ToIndex(targetX, targetY);
+            _viewsByCell[indexA].MoveToAndBack(CellToLocal(indexB));
+            _viewsByCell[indexB].MoveToAndBack(CellToLocal(indexA));
         }
 
         private void HandlePiecesSwapped(int indexA, int indexB)
@@ -172,8 +200,8 @@ namespace BoardGame.View
                 int index = matchedIndices[i];
                 PieceView view = _viewsByCell[index];
                 _viewsByCell[index] = null;
-                view.Hide();
-                _hiddenViews[_hiddenCount++] = view;
+                view.Pop();
+                _hiddenViews[_hiddenCount++] = view; // Reused by the next refill step, once the pop has finished.
             }
         }
 
@@ -182,20 +210,43 @@ namespace BoardGame.View
             PieceView view = _hiddenViews[--_hiddenCount];
             _viewsByCell[index] = view;
 
-            // Stack this swap's refills above the column so they drop in, in order, from off the board.
+            // Stack this step's refills above the column so they drop in, in order, from off the board.
             int x = _board.ToX(index);
             int spawnRow = _board.Height + _spawnRowOffset[x]++;
             view.Show(ColorOf(pieceId), CellToLocal(x, spawnRow));
             view.MoveTo(CellToLocal(index));
         }
 
-        private bool IsAnyPieceMoving()
+        // Board cells are empty (null) between a clear step and its refill; popping views sit in the hidden stack.
+        private bool IsAnyPieceBusy()
         {
             for (int i = 0; i < _viewsByCell.Length; i++)
             {
-                if (_viewsByCell[i].IsMoving) return true;
+                PieceView view = _viewsByCell[i];
+                if (view != null && view.IsBusy) return true;
+            }
+            for (int i = 0; i < _hiddenCount; i++)
+            {
+                if (_hiddenViews[i].IsBusy) return true;
             }
             return false;
+        }
+
+        // Centres the camera on the board and picks the smallest orthographic size that shows the whole
+        // board plus padding: height-bound on landscape screens, width-bound on portrait ones.
+        private void FitCamera()
+        {
+            _fittedAspect = _camera.aspect;
+            if (!_fitCamera || !_camera.orthographic) return;
+
+            Vector3 scale = _transform.lossyScale;
+            float halfWidth = (0.5f * _board.Width + _fitPadding) * _cellSize * Mathf.Abs(scale.x);
+            float halfHeight = (0.5f * _board.Height + _fitPadding) * _cellSize * Mathf.Abs(scale.y);
+            _camera.orthographicSize = Mathf.Max(halfHeight, halfWidth / _fittedAspect);
+
+            Vector3 boardCentre = _transform.position;
+            boardCentre.z = _cameraTransform.position.z;
+            _cameraTransform.position = boardCentre;
         }
 
         private Color ColorOf(int pieceId) => _pieceColors[pieceId - BoardGenerator.FirstPieceId];

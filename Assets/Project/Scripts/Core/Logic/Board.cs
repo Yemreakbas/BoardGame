@@ -30,6 +30,7 @@ namespace BoardGame.Core.Logic
 
         private readonly int[] _cells;
         private readonly BoardGenerator _generator;
+        private bool _hasHoles; // Matches were cleared; the next step collapses and refills.
 
         public int Width { get; }
         public int Height { get; }
@@ -59,12 +60,22 @@ namespace BoardGame.Core.Logic
         public int GetPiece(int x, int y) => _cells[ToIndex(x, y)];
 
         /// <summary>
-        /// Swaps two orthogonally adjacent pieces if that creates a match, then resolves the board
-        /// completely (clear, collapse, refill, cascades) before returning.
+        /// True from an accepted <see cref="Swap"/> until <see cref="ResolveStep"/> reports the board stable.
+        /// No swap is accepted meanwhile.
         /// </summary>
-        /// <returns>True if the swap was accepted. A rejected swap leaves the board untouched and raises no event.</returns>
+        public bool IsResolving { get; private set; }
+
+        /// <summary>
+        /// Swaps two orthogonally adjacent pieces if that creates a match. The board is then resolving:
+        /// drive it with <see cref="ResolveStep"/> (one step per animation beat) or <see cref="ResolveAll"/>.
+        /// </summary>
+        /// <returns>
+        /// True if the swap was accepted. A rejected swap (not adjacent, off the board, no match, or the
+        /// board still resolving) leaves the board untouched and raises no event.
+        /// </returns>
         public bool Swap(int x1, int y1, int x2, int y2)
         {
+            if (IsResolving) return false;
             if (!IsInside(x1, y1) || !IsInside(x2, y2)) return false;
             if (Math.Abs(x1 - x2) + Math.Abs(y1 - y2) != 1) return false;
 
@@ -78,25 +89,46 @@ namespace BoardGame.Core.Logic
                 return false;
             }
 
+            IsResolving = true;
             OnPiecesSwapped?.Invoke(a, b);
-            Resolve();
             return true;
         }
 
-        // Clear -> collapse -> refill until no match is left. Detection runs again here rather than reusing
-        // the swap check, so the shared match buffer is never read across an event (listeners may use it too).
-        private void Resolve()
+        /// <summary>
+        /// Advances resolution by one visible beat, alternating two kinds of step: clear every current match
+        /// (<see cref="OnMatched"/>), then collapse and refill the holes (<see cref="OnPieceMoved"/>,
+        /// <see cref="OnPieceSpawned"/>). Refills can create new matches, so cascades simply keep stepping.
+        /// </summary>
+        /// <returns>True if a step ran; false once the board is stable (and <see cref="IsResolving"/> is cleared).</returns>
+        public bool ResolveStep()
         {
-            int matchCount = MatchDetector.FindMatches(_cells, Width, Height);
-            while (matchCount > 0)
+            if (!IsResolving) return false;
+
+            if (_hasHoles)
             {
-                ClearMatches(matchCount);
-                for (int x = 0; x < Width; x++)
-                {
-                    RefillColumn(x, CollapseColumn(x));
-                }
-                matchCount = MatchDetector.FindMatches(_cells, Width, Height);
+                for (int x = 0; x < Width; x++) RefillColumn(x, CollapseColumn(x));
+                _hasHoles = false;
+                return true;
             }
+
+            // Detection runs here rather than reusing the swap check, so the shared match buffer is never
+            // read across an event (listeners may use it too).
+            int matchCount = MatchDetector.FindMatches(_cells, Width, Height);
+            if (matchCount == 0)
+            {
+                IsResolving = false;
+                return false;
+            }
+
+            ClearMatches(matchCount);
+            _hasHoles = true;
+            return true;
+        }
+
+        /// <summary>Runs <see cref="ResolveStep"/> until the board is stable, for callers that do not animate.</summary>
+        public void ResolveAll()
+        {
+            while (ResolveStep()) { }
         }
 
         private void ClearMatches(int matchCount)
