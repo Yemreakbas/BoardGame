@@ -39,6 +39,9 @@ namespace BoardGame.Core.Logic
         /// </summary>
         public event ShuffledHandler OnShuffled;
 
+        /// <summary>Resolution of the last accepted swap finished: the board is stable and takes swaps again.</summary>
+        public event Action OnSettled;
+
         /// <summary>Shuffles tried before falling back to regenerating the board.</summary>
         private const int MaxShuffleAttempts = 100;
 
@@ -152,6 +155,7 @@ namespace BoardGame.Core.Logic
 
                 _shuffledThisResolve = false;
                 IsResolving = false;
+                OnSettled?.Invoke();
                 return false;
             }
 

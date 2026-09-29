@@ -19,7 +19,7 @@ namespace BoardGame.Core.Logic
         public int Score { get; private set; }
         public int Moves { get; private set; }
 
-        /// <summary>Waves cleared so far by the current move; 0 before its first match.</summary>
+        /// <summary>Waves cleared so far by the current move; 0 before its first match and once the board settles.</summary>
         public int Combo { get; private set; }
 
         public ScoreKeeper(Board board)
@@ -27,6 +27,7 @@ namespace BoardGame.Core.Logic
             _board = board ?? throw new ArgumentNullException(nameof(board));
             _board.OnPiecesSwapped += HandlePiecesSwapped;
             _board.OnMatched += HandleMatched;
+            _board.OnSettled += HandleSettled;
         }
 
         /// <summary>Stops listening to the board.</summary>
@@ -34,6 +35,7 @@ namespace BoardGame.Core.Logic
         {
             _board.OnPiecesSwapped -= HandlePiecesSwapped;
             _board.OnMatched -= HandleMatched;
+            _board.OnSettled -= HandleSettled;
         }
 
         private void HandlePiecesSwapped(int indexA, int indexB)
@@ -47,6 +49,12 @@ namespace BoardGame.Core.Logic
         {
             Combo++;
             Score += matchedIndices.Length * PointsPerPiece * Combo;
+            OnChanged?.Invoke();
+        }
+
+        private void HandleSettled()
+        {
+            Combo = 0;
             OnChanged?.Invoke();
         }
     }

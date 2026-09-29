@@ -42,6 +42,8 @@ namespace BoardGame.View
         [SerializeField] private Camera _camera;
         [Tooltip("Drag distance, in cells, that turns a press into a swipe.")]
         [SerializeField, Range(0.1f, 1f)] private float _swipeThreshold = 0.35f;
+        [Tooltip("Seconds of inactivity on a settled board before a possible move is pointed out.")]
+        [SerializeField, Min(0.5f)] private float _hintDelay = 5f;
 
         /// <summary>Score of the running session; created in Awake, so read it from Start onwards.</summary>
         public ScoreKeeper Score { get; private set; }
@@ -61,6 +63,10 @@ namespace BoardGame.View
         private int _swipeX;
         private int _swipeY;
         private Vector2 _swipeStart;         // board-local
+
+        private float _idleTime;             // seconds the board has been settled without a press
+        private int _hintA = -1;             // cells of the hint being shown, -1 when none
+        private int _hintB = -1;
 
         private void Awake()
         {
@@ -131,17 +137,53 @@ namespace BoardGame.View
             }
 
             Pointer pointer = Pointer.current; // Last used mouse, pen or touchscreen.
-            if (pointer == null) return;
+            if (pointer != null)
+            {
+                if (pointer.press.wasPressedThisFrame)
+                {
+                    StopHint(); // Any press counts as activity and clears the hint.
+                    BeginSwipe(pointer.position.ReadValue());
+                }
+                else if (_isSwiping)
+                {
+                    if (pointer.press.isPressed) TrackSwipe(pointer.position.ReadValue());
+                    else _isSwiping = false;
+                }
+            }
 
-            if (pointer.press.wasPressedThisFrame)
+            UpdateHint();
+        }
+
+        // Counts settled, untouched time and, past the delay, pulses the two pieces of one possible move.
+        private void UpdateHint()
+        {
+            if (_hintA >= 0) return;
+            if (_isSwiping || IsAnyPieceBusy())
             {
-                BeginSwipe(pointer.position.ReadValue());
+                _idleTime = 0f;
+                return;
             }
-            else if (_isSwiping)
+
+            _idleTime += Time.deltaTime;
+            if (_idleTime < _hintDelay) return;
+            if (!_board.FindPossibleMove(out _hintA, out _hintB))
             {
-                if (pointer.press.isPressed) TrackSwipe(pointer.position.ReadValue());
-                else _isSwiping = false;
+                _idleTime = 0f; // Only a board too small for any move; retry after another delay.
+                return;
             }
+
+            _viewsByCell[_hintA].StartHint();
+            _viewsByCell[_hintB].StartHint();
+        }
+
+        private void StopHint()
+        {
+            _idleTime = 0f;
+            if (_hintA < 0) return;
+            _viewsByCell[_hintA].StopHint();
+            _viewsByCell[_hintB].StopHint();
+            _hintA = -1;
+            _hintB = -1;
         }
 
         private void BeginSwipe(Vector2 screenPosition)
