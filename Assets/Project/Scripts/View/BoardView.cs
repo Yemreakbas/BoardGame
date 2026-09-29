@@ -43,6 +43,9 @@ namespace BoardGame.View
         [Tooltip("Drag distance, in cells, that turns a press into a swipe.")]
         [SerializeField, Range(0.1f, 1f)] private float _swipeThreshold = 0.35f;
 
+        /// <summary>Score of the running session; created in Awake, so read it from Start onwards.</summary>
+        public ScoreKeeper Score { get; private set; }
+
         private Board _board;
         private Transform _transform;
         private Transform _cameraTransform;
@@ -75,6 +78,7 @@ namespace BoardGame.View
 
             int seed = _seed != 0 ? _seed : Environment.TickCount;
             _board = new Board(_width, _height, new BoardGenerator(_pieceColors.Length, seed));
+            Score = new ScoreKeeper(_board);
 
             int cellCount = _board.CellCount;
             _viewsByCell = new PieceView[cellCount];
@@ -103,6 +107,7 @@ namespace BoardGame.View
         private void OnDestroy()
         {
             if (_board == null) return;
+            Score.Dispose();
             _board.OnPiecesSwapped -= HandlePiecesSwapped;
             _board.OnPieceMoved -= HandlePieceMoved;
             _board.OnMatched -= HandleMatched;
