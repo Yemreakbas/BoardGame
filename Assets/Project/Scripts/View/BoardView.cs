@@ -64,6 +64,9 @@ namespace BoardGame.View
         [SerializeField] private PieceView _piecePrefab;
         [Tooltip("Optional: particles, beams and sounds for board events.")]
         [SerializeField] private EffectsView _effects;
+        [Tooltip("Optional: score orbs flying from cleared pieces into the score bar.")]
+        [SerializeField] private ScoreFlyView _flyer;
+        [SerializeField, Range(1, 20)] private int _maxOrbsPerWave = 10;
         [SerializeField, Min(0.01f)] private float _cellSize = 1f;
         [Tooltip("Keeps an orthographic camera centred on the board and zoomed to fit it on any aspect ratio.")]
         [SerializeField] private bool _fitCamera = true;
@@ -402,6 +405,14 @@ namespace BoardGame.View
 
         private void HandleMatched(ReadOnlySpan<int> matchedIndices)
         {
+            // ScoreKeeper already counted this wave; a wave that only broke locks clears nothing to pop.
+            int points = Score.Score - _lastScore;
+            _lastScore = Score.Score;
+
+            // The wave's points ride a few orbs from the cleared pieces into the score bar.
+            int orbs = Mathf.Min(matchedIndices.Length, _maxOrbsPerWave);
+            int share = orbs > 0 ? points / orbs : 0;
+
             Vector3 centre = Vector3.zero;
             for (int i = 0; i < matchedIndices.Length; i++)
             {
@@ -409,14 +420,16 @@ namespace BoardGame.View
                 PieceView view = _viewsByCell[index];
                 _viewsByCell[index] = null;
                 centre += CellToLocal(index);
+                if (_flyer != null && i < orbs)
+                {
+                    int carried = i == orbs - 1 ? points - share * (orbs - 1) : share; // last orb takes the remainder
+                    _flyer.Launch(_transform.TransformPoint(CellToLocal(index)), view.Color, carried, 0.12f + 0.03f * i);
+                }
                 if (_effects != null) PlayClearEffects(index, view);
                 view.Pop();
                 _hiddenViews[_hiddenCount++] = view; // Reused by the next refill step, once the pop has finished.
             }
 
-            // ScoreKeeper already counted this wave; a wave that only broke locks clears nothing to pop.
-            int points = Score.Score - _lastScore;
-            _lastScore = Score.Score;
             if (_effects == null || matchedIndices.Length == 0) return;
 
             Vector3 middle = _transform.TransformPoint(centre / matchedIndices.Length);
@@ -424,7 +437,8 @@ namespace BoardGame.View
             _effects.ScorePopup(middle, points, Score.Combo);
             _effects.Shockwave(middle, new Color(1f, 0.95f, 0.8f, 0.9f), 1.4f + 0.18f * matchedIndices.Length, 0.35f);
             _effects.Sparkle(middle, new Color(1f, 0.85f, 0.35f), 3 + 3 * Score.Combo);
-            if (Score.Combo >= 3) _effects.Shake(0.035f * Score.Combo, 0.25f);
+            // Chained waves shake harder and harder.
+            if (Score.Combo >= 2) _effects.Shake(Mathf.Min(0.45f, 0.06f * Score.Combo), 0.28f + 0.03f * Score.Combo);
         }
 
         // Particles for every cleared piece; a beam or a flash when the piece was a special firing.
