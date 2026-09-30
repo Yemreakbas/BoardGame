@@ -51,10 +51,20 @@ namespace BoardGame.Core.Logic
         /// <summary>Resolution of the last accepted swap finished: the board is stable and takes swaps again.</summary>
         public event Action OnSettled;
 
+        /// <summary>
+        /// Ice under (index) cracked: (index, layersLeft). Ice is a second layer fixed to the cell, under
+        /// whatever piece is there; each clear of that cell removes one layer. Raised after the step's OnMatched.
+        /// </summary>
+        public event Action<int, int> OnIceChanged;
+
+        /// <summary>Thickest ice a cell can hold.</summary>
+        public const int MaxIceLayers = 2;
+
         /// <summary>Shuffles tried before falling back to regenerating the board.</summary>
         private const int MaxShuffleAttempts = 100;
 
         private readonly int[] _cells;
+        private readonly int[] _ice;            // ice layers per cell, 0 = none
         private readonly int[] _shuffleSources;
         private readonly BoardGenerator _generator;
         private bool _hasHoles; // Matches were cleared; the next step collapses and refills.
@@ -80,6 +90,7 @@ namespace BoardGame.Core.Logic
             Width = width;
             Height = height;
             _cells = new int[cellCount];
+            _ice = new int[cellCount];
             _shuffleSources = new int[cellCount];
             _generator.Fill(_cells, width, height);
             if (!FindPossibleMove(out _, out _)) Shuffle(); // Nobody listens yet, so this is silent.
@@ -92,6 +103,24 @@ namespace BoardGame.Core.Logic
 
         public int GetPiece(int index) => _cells[index];
         public int GetPiece(int x, int y) => _cells[ToIndex(x, y)];
+
+        /// <summary>Ice layers left under a cell (0 = none).</summary>
+        public int GetIce(int index) => _ice[index];
+
+        /// <summary>How many cells still have ice.</summary>
+        public int IceCount { get; private set; }
+
+        /// <summary>Lays ice under a cell. Level setup only: not allowed while the board is resolving.</summary>
+        public void SetIce(int index, int layers)
+        {
+            if (IsResolving) throw new InvalidOperationException("Ice can only be set up on a stable board.");
+            if ((uint)index >= (uint)_cells.Length) throw new ArgumentOutOfRangeException(nameof(index));
+
+            layers = Math.Max(0, Math.Min(MaxIceLayers, layers));
+            if (_ice[index] > 0) IceCount--;
+            _ice[index] = layers;
+            if (layers > 0) IceCount++;
+        }
 
         /// <summary>Finds one swap that would create a match (e.g. for a hint). Only meaningful while not resolving.</summary>
         public bool FindPossibleMove(out int indexA, out int indexB)
@@ -217,12 +246,13 @@ namespace BoardGame.Core.Logic
             for (int head = 0; head < queued; head++) queued = Fire(queue[head], flags, protectedCells, queued);
 
             int[] results = GlobalBuffer.MatchResultIndices;
-            int count = 0;
+            int count = 0, cracked = 0;
             for (int i = 0; i < cellCount; i++)
             {
                 if (!flags[i]) continue;
                 results[count++] = i;
                 _cells[i] = Empty;
+                cracked = CrackIce(i, cracked);
             }
 
             for (int s = 0; s < spawnCount; s++)
@@ -230,9 +260,22 @@ namespace BoardGame.Core.Logic
                 int index = GlobalBuffer.SpawnIndices[s];
                 int piece = GlobalBuffer.SpawnPieces[s];
                 _cells[index] = piece;
+                cracked = CrackIce(index, cracked); // it was part of the match, so the ice under it breaks too
                 OnSpecialCreated?.Invoke(index, piece);
             }
             OnMatched?.Invoke(results.AsSpan(0, count));
+
+            int[] crackedCells = GlobalBuffer.IceCracked;
+            for (int c = 0; c < cracked; c++) OnIceChanged?.Invoke(crackedCells[c], _ice[crackedCells[c]]);
+        }
+
+        // Removes one ice layer under `index`, recording the cell for OnIceChanged. Returns the new count.
+        private int CrackIce(int index, int cracked)
+        {
+            if (_ice[index] == 0) return cracked;
+            if (--_ice[index] == 0) IceCount--;
+            GlobalBuffer.IceCracked[cracked] = index;
+            return cracked + 1;
         }
 
         // A run of 5+ makes a color bomb, a run of 4 a rocket along the run. Returns how many were queued

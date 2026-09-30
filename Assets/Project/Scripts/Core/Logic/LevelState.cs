@@ -10,9 +10,9 @@ namespace BoardGame.Core.Logic
     }
 
     /// <summary>
-    /// Level rules: reach <see cref="TargetScore"/> within <see cref="MoveLimit"/> moves. The outcome is
-    /// decided only when the board settles, so the cascades of the last move still count.
-    /// Allocation-free once constructed.
+    /// Level rules: within <see cref="MoveLimit"/> moves, reach <see cref="TargetScore"/> and break all the
+    /// ice on the board (levels without ice only need the score). The outcome is decided only when the board
+    /// settles, so the cascades of the last move still count. Allocation-free once constructed.
     /// </summary>
     public sealed class LevelState : IDisposable
     {
@@ -53,7 +53,7 @@ namespace BoardGame.Core.Logic
         {
             if (Outcome != LevelOutcome.Playing) return;
 
-            if (_score.Score >= TargetScore) Outcome = LevelOutcome.Won;
+            if (_score.Score >= TargetScore && _board.IceCount == 0) Outcome = LevelOutcome.Won;
             else if (MovesLeft == 0) Outcome = LevelOutcome.Lost;
             else return;
 

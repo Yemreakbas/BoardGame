@@ -15,6 +15,21 @@ MonoBehaviour:
   _width: 8
   _height: 8
   _colorCount: 6
-  _moveLimit: 22
-  _targetScore: 1650
+  _moveLimit: 28
+  _targetScore: 1200
   _seed: 0
+  _iceLayout: '........
+
+    ........
+
+    ........
+
+    11111111
+
+    11111111
+
+    ........
+
+    ........
+
+    ........'

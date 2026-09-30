@@ -34,6 +34,10 @@ namespace BoardGame.View
 
         [Tooltip("Body color of color bombs, which have no piece color of their own.")]
         [SerializeField] private Color _bombColor = new Color(0.42f, 0.40f, 0.52f);
+        [Tooltip("Sprite drawn under pieces on iced cells.")]
+        [SerializeField] private Sprite _iceSprite;
+        [Tooltip("Ice tint; alpha is the one-layer strength, thicker ice is more opaque.")]
+        [SerializeField] private Color _iceColor = new Color(0.72f, 0.9f, 1f, 0.35f);
 
         [Header("Level")]
         [Tooltip("When set, board size, colors, moves and target come from the player's current level; the fields below are ignored.")]
@@ -77,6 +81,15 @@ namespace BoardGame.View
         /// </summary>
         public bool IsPaused { get; set; }
 
+        /// <summary>True when the level started with ice (the HUD then shows how much is left).</summary>
+        public bool HasIce { get; private set; }
+
+        /// <summary>Cells that still have ice.</summary>
+        public int IceLeft => _board.IceCount;
+
+        /// <summary>Some ice cracked; read <see cref="IceLeft"/>.</summary>
+        public event Action IceChanged;
+
         private Board _board;
         private Transform _transform;
         private Transform _cameraTransform;
@@ -86,6 +99,7 @@ namespace BoardGame.View
         private int _hiddenCount;
         private int[] _spawnRowOffset;       // per column: refills already stacked above the board this step
         private PieceView[] _shuffleScratch; // copy of _viewsByCell while a shuffle remaps it
+        private SpriteRenderer[] _iceTiles;  // per cell; null where the level has no ice
         private float _fittedAspect;         // camera aspect the fit was computed for; 0 forces a refit
 
         private bool _isSwiping;
@@ -127,6 +141,12 @@ namespace BoardGame.View
             if (seed == 0) seed = Environment.TickCount;
 
             _board = new Board(width, height, new BoardGenerator(colors, seed));
+            if (level != null && level.HasIce)
+            {
+                int[] ice = level.BuildIce();
+                for (int i = 0; i < ice.Length; i++) if (ice[i] > 0) _board.SetIce(i, ice[i]);
+                HasIce = _board.IceCount > 0;
+            }
             Score = new ScoreKeeper(_board);
             Level = new LevelState(_board, Score, moveLimit, targetScore);
 
@@ -136,6 +156,21 @@ namespace BoardGame.View
             _spawnRowOffset = new int[_board.Width];
             _shuffleScratch = new PieceView[cellCount];
             _cellOrigin = new Vector3(-0.5f * (_board.Width - 1) * _cellSize, -0.5f * (_board.Height - 1) * _cellSize, 0f);
+
+            // Ice tiles sit under the pieces and never move; only iced cells get one.
+            _iceTiles = new SpriteRenderer[cellCount];
+            for (int index = 0; index < cellCount && HasIce; index++)
+            {
+                if (_board.GetIce(index) == 0) continue;
+                var tile = new GameObject("Ice").AddComponent<SpriteRenderer>();
+                tile.transform.SetParent(_transform, false);
+                tile.transform.localPosition = CellToLocal(index);
+                tile.transform.localScale = Vector3.one * _cellSize;
+                tile.sprite = _iceSprite;
+                tile.sortingOrder = -1;
+                _iceTiles[index] = tile;
+                UpdateIceTile(index);
+            }
 
             // The only instantiation in the game: one view per cell, recycled from here on.
             for (int index = 0; index < cellCount; index++)
@@ -152,6 +187,7 @@ namespace BoardGame.View
             _board.OnPieceSpawned += HandlePieceSpawned;
             _board.OnShuffled += HandleShuffled;
             _board.OnSpecialCreated += HandleSpecialCreated;
+            _board.OnIceChanged += HandleIceChanged;
 
             FitCamera();
         }
@@ -167,6 +203,7 @@ namespace BoardGame.View
             _board.OnPieceSpawned -= HandlePieceSpawned;
             _board.OnShuffled -= HandleShuffled;
             _board.OnSpecialCreated -= HandleSpecialCreated;
+            _board.OnIceChanged -= HandleIceChanged;
         }
 
         private void Update()
@@ -408,6 +445,25 @@ namespace BoardGame.View
         {
             int color = Piece.ColorOf(pieceId);
             return color == Board.Empty ? _bombColor : _pieceColors[color - BoardGenerator.FirstPieceId];
+        }
+
+        private void HandleIceChanged(int index, int layersLeft)
+        {
+            UpdateIceTile(index);
+            if (_effects != null) _effects.Burst(_transform.TransformPoint(CellToLocal(index)), Color.white, 10);
+            IceChanged?.Invoke();
+        }
+
+        // One layer shows the base tint; each extra layer adds opacity. No layers left: hidden.
+        private void UpdateIceTile(int index)
+        {
+            SpriteRenderer tile = _iceTiles[index];
+            if (tile == null) return;
+            int layers = _board.GetIce(index);
+            tile.enabled = layers > 0;
+            Color color = _iceColor;
+            color.a = Mathf.Clamp01(_iceColor.a * (1f + 0.8f * (layers - 1)));
+            tile.color = color;
         }
 
         // A run of 4+ turned this piece into a special where it stands: only its look changes.

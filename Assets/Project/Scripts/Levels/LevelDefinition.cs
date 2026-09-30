@@ -14,6 +14,9 @@ namespace BoardGame.Levels
         [SerializeField, Min(1)] private int _targetScore = 2000;
         [Tooltip("Same seed, same level every time. 0 picks a new layout on each attempt.")]
         [SerializeField] private int _seed;
+        [Tooltip("Ice under the board, one line per row from the TOP: '.' none, '1' or '2' layers. " +
+                 "Leave empty for no ice. With ice, the level is won only once all of it is broken.")]
+        [SerializeField, TextArea(3, 12)] private string _iceLayout = "";
 
         public int Width => _width;
         public int Height => _height;
@@ -21,9 +24,34 @@ namespace BoardGame.Levels
         public int MoveLimit => _moveLimit;
         public int TargetScore => _targetScore;
         public int Seed => _seed;
+        public bool HasIce => !string.IsNullOrWhiteSpace(_iceLayout);
+
+        /// <summary>
+        /// Ice layers per cell in board order (index = y * Width + x, y = 0 at the bottom), parsed from the
+        /// top-down text layout. Missing rows or columns mean no ice; unknown characters are ignored.
+        /// Allocates: call at level setup only.
+        /// </summary>
+        public int[] BuildIce()
+        {
+            var ice = new int[_width * _height];
+            if (!HasIce) return ice;
+
+            string[] rows = _iceLayout.Replace("\r", "").Split('\n');
+            for (int row = 0; row < rows.Length && row < _height; row++)
+            {
+                int y = _height - 1 - row;
+                string line = rows[row].Trim();
+                for (int x = 0; x < line.Length && x < _width; x++)
+                {
+                    char c = line[x];
+                    if (c >= '1' && c <= '9') ice[y * _width + x] = c - '0';
+                }
+            }
+            return ice;
+        }
 
         /// <summary>Editor/setup helper for building a catalog from code.</summary>
-        public void Configure(int width, int height, int colorCount, int moveLimit, int targetScore, int seed = 0)
+        public void Configure(int width, int height, int colorCount, int moveLimit, int targetScore, int seed = 0, string iceLayout = "")
         {
             _width = width;
             _height = height;
@@ -31,6 +59,7 @@ namespace BoardGame.Levels
             _moveLimit = moveLimit;
             _targetScore = targetScore;
             _seed = seed;
+            _iceLayout = iceLayout ?? "";
         }
     }
 }
