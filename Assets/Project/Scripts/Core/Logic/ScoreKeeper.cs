@@ -47,6 +47,7 @@ namespace BoardGame.Core.Logic
 
         private void HandleMatched(ReadOnlySpan<int> matchedIndices)
         {
+            if (matchedIndices.Length == 0) return; // a wave that only broke locks clears nothing
             Combo++;
             Score += matchedIndices.Length * PointsPerPiece * Combo;
             OnChanged?.Invoke();

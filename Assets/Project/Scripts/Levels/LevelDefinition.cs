@@ -17,6 +17,9 @@ namespace BoardGame.Levels
         [Tooltip("Ice under the board, one line per row from the TOP: '.' none, '1' or '2' layers. " +
                  "Leave empty for no ice. With ice, the level is won only once all of it is broken.")]
         [SerializeField, TextArea(3, 12)] private string _iceLayout = "";
+        [Tooltip("Locked pieces, one line per row from the TOP: 'L' locked, '.' free. Leave empty for none. " +
+                 "With locks, the level is won only once every lock is broken.")]
+        [SerializeField, TextArea(3, 12)] private string _lockLayout = "";
 
         public int Width => _width;
         public int Height => _height;
@@ -25,6 +28,26 @@ namespace BoardGame.Levels
         public int TargetScore => _targetScore;
         public int Seed => _seed;
         public bool HasIce => !string.IsNullOrWhiteSpace(_iceLayout);
+        public bool HasLocks => !string.IsNullOrWhiteSpace(_lockLayout);
+
+        /// <summary>Locked cells in board order, parsed like <see cref="BuildIce"/>. Setup only: allocates.</summary>
+        public bool[] BuildLocks()
+        {
+            var locks = new bool[_width * _height];
+            if (!HasLocks) return locks;
+
+            string[] rows = _lockLayout.Replace("\r", "").Split('\n');
+            for (int row = 0; row < rows.Length && row < _height; row++)
+            {
+                int y = _height - 1 - row;
+                string line = rows[row].Trim();
+                for (int x = 0; x < line.Length && x < _width; x++)
+                {
+                    if (line[x] == 'L' || line[x] == 'l') locks[y * _width + x] = true;
+                }
+            }
+            return locks;
+        }
 
         /// <summary>
         /// Ice layers per cell in board order (index = y * Width + x, y = 0 at the bottom), parsed from the
@@ -51,8 +74,10 @@ namespace BoardGame.Levels
         }
 
         /// <summary>Editor/setup helper for building a catalog from code.</summary>
-        public void Configure(int width, int height, int colorCount, int moveLimit, int targetScore, int seed = 0, string iceLayout = "")
+        public void Configure(int width, int height, int colorCount, int moveLimit, int targetScore, int seed = 0,
+                              string iceLayout = "", string lockLayout = "")
         {
+            _lockLayout = lockLayout ?? "";
             _width = width;
             _height = height;
             _colorCount = colorCount;

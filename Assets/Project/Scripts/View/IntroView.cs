@@ -16,6 +16,8 @@ namespace BoardGame.View
         [SerializeField] private TMP_Text _scoreGoalText;
         [Tooltip("Hidden on levels without ice.")]
         [SerializeField] private TMP_Text _iceGoalText;
+        [Tooltip("Optional; hidden on levels without locks.")]
+        [SerializeField] private TMP_Text _lockGoalText;
         [SerializeField] private TMP_Text _movesText;
         [SerializeField] private Button _playButton;
 
@@ -36,6 +38,11 @@ namespace BoardGame.View
             _scoreGoalText.SetText("Score {0}", (float)_boardView.Level.TargetScore);
             _iceGoalText.gameObject.SetActive(_boardView.HasIce);
             if (_boardView.HasIce) _iceGoalText.SetText("Break all ice ({0})", (float)_boardView.IceLeft);
+            if (_lockGoalText != null)
+            {
+                _lockGoalText.gameObject.SetActive(_boardView.HasLocks);
+                if (_boardView.HasLocks) _lockGoalText.SetText("Unlock all pieces ({0})", (float)_boardView.LocksLeft);
+            }
             _movesText.SetText("in {0} moves", (float)_boardView.Level.MoveLimit);
 
             _playButton.onClick.AddListener(Play);

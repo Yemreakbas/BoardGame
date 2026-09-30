@@ -19,6 +19,8 @@ namespace BoardGame.View
         [SerializeField] private SpriteRenderer _renderer;
         [Tooltip("Overlay drawn on specials: a stripe along a rocket's line, a square on a color bomb.")]
         [SerializeField] private SpriteRenderer _marker;
+        [Tooltip("Overlay drawn while the piece is locked.")]
+        [SerializeField] private SpriteRenderer _lockOverlay;
 
         [Header("Motion")]
         [Tooltip("Seconds for a one-cell swap; longer trips scale with the square root of the distance.")]
@@ -82,6 +84,7 @@ namespace BoardGame.View
         {
             gameObject.SetActive(true); // First, so Awake has run even if the prefab was saved inactive.
             SetLook(color, special);
+            SetLocked(false); // refills are never locked; level setup locks pieces afterwards
             _transform.localPosition = localPosition;
             _target = localPosition;
             _returnPending = false;
@@ -108,6 +111,12 @@ namespace BoardGame.View
                     _marker.transform.localScale = new Vector3(0.45f, 0.45f, 1f);
                     break;
             }
+        }
+
+        /// <summary>Shows or hides the lock overlay.</summary>
+        public void SetLocked(bool locked)
+        {
+            if (_lockOverlay != null) _lockOverlay.enabled = locked;
         }
 
         /// <summary>Starts pulsing to point out a possible move. Only call on an idle piece.</summary>

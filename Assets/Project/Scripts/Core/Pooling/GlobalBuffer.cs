@@ -48,6 +48,9 @@ namespace BoardGame.Core.Pooling
         public static readonly int[] SpawnIndices = new int[MaxCellCount];
         public static readonly int[] SpawnPieces = new int[MaxCellCount];
 
+        /// <summary>Board scratch: cells whose lock broke this step (the piece stays), reported before OnMatched.</summary>
+        public static readonly int[] Unlocked = new int[MaxCellCount];
+
         /// <summary>Board scratch: cells whose ice cracked this step, reported after OnMatched.</summary>
         public static readonly int[] IceCracked = new int[MaxCellCount];
 

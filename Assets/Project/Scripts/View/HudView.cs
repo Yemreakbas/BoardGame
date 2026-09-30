@@ -19,6 +19,8 @@ namespace BoardGame.View
         [SerializeField] private TMP_Text _levelText;
         [Tooltip("Optional: ice cells left, shown only on levels that have ice.")]
         [SerializeField] private TMP_Text _iceText;
+        [Tooltip("Optional: locked pieces left, shown only on levels that have locks.")]
+        [SerializeField] private TMP_Text _lockText;
 
         private ScoreKeeper _score;
         private LevelState _level;
@@ -52,12 +54,31 @@ namespace BoardGame.View
                     RefreshIce();
                 }
             }
+
+            if (_lockText != null)
+            {
+                _lockText.gameObject.SetActive(_boardView.HasLocks);
+                if (_boardView.HasLocks)
+                {
+                    _boardView.LocksChanged += RefreshLocks;
+                    RefreshLocks();
+                }
+            }
+        }
+
+        private void RefreshLocks()
+        {
+            _lockText.SetText("Locks left {0}", (float)_boardView.LocksLeft);
         }
 
         private void OnDestroy()
         {
             if (_score != null) _score.OnChanged -= Refresh;
-            if (_boardView != null) _boardView.IceChanged -= RefreshIce;
+            if (_boardView != null)
+            {
+                _boardView.IceChanged -= RefreshIce;
+                _boardView.LocksChanged -= RefreshLocks;
+            }
         }
 
         private void RefreshIce()

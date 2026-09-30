@@ -81,6 +81,7 @@ namespace BoardGame.Core.Logic
         public static bool IsAcceptedSwap(int[] cells, int width, int height, int a, int b)
         {
             if (cells[a] == Board.Empty || cells[b] == Board.Empty) return false;
+            if (Piece.IsLocked(cells[a]) || Piece.IsLocked(cells[b])) return false;
             if (Piece.IsColorBomb(cells[a]) || Piece.IsColorBomb(cells[b])) return true;
             if (Piece.ColorOf(cells[a]) == Piece.ColorOf(cells[b])) return false;
 

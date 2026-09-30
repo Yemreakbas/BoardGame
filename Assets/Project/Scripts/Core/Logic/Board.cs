@@ -60,6 +60,12 @@ namespace BoardGame.Core.Logic
         /// <summary>Thickest ice a cell can hold.</summary>
         public const int MaxIceLayers = 2;
 
+        /// <summary>
+        /// A clear hit the locked piece at (index): the lock broke and the piece stays, now free. Raised just
+        /// before the step's OnMatched (the index is not part of it).
+        /// </summary>
+        public event Action<int> OnPieceUnlocked;
+
         /// <summary>Shuffles tried before falling back to regenerating the board.</summary>
         private const int MaxShuffleAttempts = 100;
 
@@ -109,6 +115,32 @@ namespace BoardGame.Core.Logic
 
         /// <summary>How many cells still have ice.</summary>
         public int IceCount { get; private set; }
+
+        /// <summary>How many locked pieces are left.</summary>
+        public int LockCount { get; private set; }
+
+        public bool IsLocked(int index) => Piece.IsLocked(_cells[index]);
+
+        /// <summary>Locks or frees the plain piece at a cell. Level setup only; specials cannot be locked.</summary>
+        public void SetLocked(int index, bool locked)
+        {
+            if (IsResolving) throw new InvalidOperationException("Locks can only be set up on a stable board.");
+            if ((uint)index >= (uint)_cells.Length) throw new ArgumentOutOfRangeException(nameof(index));
+            if (Piece.SpecialOf(_cells[index]) != SpecialKind.None) throw new InvalidOperationException("Specials cannot be locked.");
+
+            if (Piece.IsLocked(_cells[index]) == locked) return;
+            _cells[index] = Piece.WithLock(_cells[index], locked);
+            LockCount += locked ? 1 : -1;
+        }
+
+        /// <summary>
+        /// Call after placing ice and locks: locks can leave the opening board without a single move, in
+        /// which case it is shuffled silently (locked pieces keep their locks).
+        /// </summary>
+        public void FinishSetup()
+        {
+            if (!IsResolving && !FindPossibleMove(out _, out _)) Shuffle();
+        }
 
         /// <summary>Lays ice under a cell. Level setup only: not allowed while the board is resolving.</summary>
         public void SetIce(int index, int layers)
@@ -246,14 +278,25 @@ namespace BoardGame.Core.Logic
             for (int head = 0; head < queued; head++) queued = Fire(queue[head], flags, protectedCells, queued);
 
             int[] results = GlobalBuffer.MatchResultIndices;
-            int count = 0, cracked = 0;
+            int count = 0, cracked = 0, unlocked = 0;
             for (int i = 0; i < cellCount; i++)
             {
                 if (!flags[i]) continue;
+                cracked = CrackIce(i, cracked);
+
+                if (Piece.IsLocked(_cells[i]))
+                {
+                    // A hit on a locked piece only breaks the lock; the piece stays and is free from now on.
+                    _cells[i] = Piece.WithLock(_cells[i], false);
+                    LockCount--;
+                    GlobalBuffer.Unlocked[unlocked++] = i;
+                    continue;
+                }
+
                 results[count++] = i;
                 _cells[i] = Empty;
-                cracked = CrackIce(i, cracked);
             }
+            for (int u = 0; u < unlocked; u++) OnPieceUnlocked?.Invoke(GlobalBuffer.Unlocked[u]);
 
             for (int s = 0; s < spawnCount; s++)
             {
@@ -327,7 +370,7 @@ namespace BoardGame.Core.Logic
 
         private bool CanHoldNewSpecial(int cell, bool[] protectedCells)
         {
-            return !protectedCells[cell] && Piece.SpecialOf(_cells[cell]) == SpecialKind.None;
+            return !protectedCells[cell] && Piece.SpecialOf(_cells[cell]) == SpecialKind.None && !Piece.IsLocked(_cells[cell]);
         }
 
         // A bomb swapped with a piece clears that piece's color; two bombs clear the whole board.
@@ -454,6 +497,9 @@ namespace BoardGame.Core.Logic
                 if (MatchDetector.FindMatches(_cells, Width, Height) == 0 && FindPossibleMove(out _, out _)) return;
             }
 
+            // Fresh boards carry no locks (e.g. too many locked pieces left no playable arrangement): the locks
+            // are gone, so the count must follow.
+            LockCount = 0;
             for (int attempt = 0; attempt < MaxShuffleAttempts; attempt++)
             {
                 _generator.Fill(_cells, Width, Height);

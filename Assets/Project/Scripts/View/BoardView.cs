@@ -90,6 +90,15 @@ namespace BoardGame.View
         /// <summary>Some ice cracked; read <see cref="IceLeft"/>.</summary>
         public event Action IceChanged;
 
+        /// <summary>True when the level started with locked pieces.</summary>
+        public bool HasLocks { get; private set; }
+
+        /// <summary>Locked pieces left.</summary>
+        public int LocksLeft => _board.LockCount;
+
+        /// <summary>A lock broke; read <see cref="LocksLeft"/>.</summary>
+        public event Action LocksChanged;
+
         private Board _board;
         private Transform _transform;
         private Transform _cameraTransform;
@@ -147,6 +156,16 @@ namespace BoardGame.View
                 for (int i = 0; i < ice.Length; i++) if (ice[i] > 0) _board.SetIce(i, ice[i]);
                 HasIce = _board.IceCount > 0;
             }
+            if (level != null && level.HasLocks)
+            {
+                bool[] locks = level.BuildLocks();
+                for (int i = 0; i < locks.Length; i++)
+                {
+                    if (locks[i] && Piece.SpecialOf(_board.GetPiece(i)) == SpecialKind.None) _board.SetLocked(i, true);
+                }
+            }
+            _board.FinishSetup(); // locks can leave the opening board without a move
+            HasLocks = _board.LockCount > 0;
             Score = new ScoreKeeper(_board);
             Level = new LevelState(_board, Score, moveLimit, targetScore);
 
@@ -178,6 +197,7 @@ namespace BoardGame.View
                 PieceView view = Instantiate(_piecePrefab, _transform);
                 int piece = _board.GetPiece(index);
                 view.Show(ColorOf(piece), Piece.SpecialOf(piece), CellToLocal(index));
+                view.SetLocked(Piece.IsLocked(piece));
                 _viewsByCell[index] = view;
             }
 
@@ -188,6 +208,7 @@ namespace BoardGame.View
             _board.OnShuffled += HandleShuffled;
             _board.OnSpecialCreated += HandleSpecialCreated;
             _board.OnIceChanged += HandleIceChanged;
+            _board.OnPieceUnlocked += HandlePieceUnlocked;
 
             FitCamera();
         }
@@ -204,6 +225,7 @@ namespace BoardGame.View
             _board.OnShuffled -= HandleShuffled;
             _board.OnSpecialCreated -= HandleSpecialCreated;
             _board.OnIceChanged -= HandleIceChanged;
+            _board.OnPieceUnlocked -= HandlePieceUnlocked;
         }
 
         private void Update()
@@ -355,7 +377,8 @@ namespace BoardGame.View
                 view.Pop();
                 _hiddenViews[_hiddenCount++] = view; // Reused by the next refill step, once the pop has finished.
             }
-            if (_effects != null) _effects.PlayPop(Score.Combo); // ScoreKeeper already counted this wave
+            // ScoreKeeper already counted this wave; a wave that only broke locks clears nothing to pop.
+            if (_effects != null && matchedIndices.Length > 0) _effects.PlayPop(Score.Combo);
         }
 
         // Particles for every cleared piece; a beam or a flash when the piece was a special firing.
@@ -405,6 +428,7 @@ namespace BoardGame.View
                 _viewsByCell[index] = view;
                 int piece = _board.GetPiece(index);
                 view.SetLook(ColorOf(piece), Piece.SpecialOf(piece));
+                view.SetLocked(Piece.IsLocked(piece)); // a regenerating fallback drops locks
                 view.MoveTo(CellToLocal(index));
             }
         }
@@ -445,6 +469,14 @@ namespace BoardGame.View
         {
             int color = Piece.ColorOf(pieceId);
             return color == Board.Empty ? _bombColor : _pieceColors[color - BoardGenerator.FirstPieceId];
+        }
+
+        private void HandlePieceUnlocked(int index)
+        {
+            PieceView view = _viewsByCell[index];
+            view.SetLocked(false);
+            if (_effects != null) _effects.Burst(_transform.TransformPoint(CellToLocal(index)), new Color(0.8f, 0.82f, 0.88f), 10);
+            LocksChanged?.Invoke();
         }
 
         private void HandleIceChanged(int index, int layersLeft)
