@@ -17,6 +17,8 @@ namespace BoardGame.View
         [SerializeField] private TMP_Text _titleText;
         [SerializeField] private TMP_Text _scoreText;
         [SerializeField] private Button _restartButton;
+        [Tooltip("Optional: plays the win or lose jingle.")]
+        [SerializeField] private EffectsView _effects;
 
         private LevelState _level;
 
@@ -54,6 +56,7 @@ namespace BoardGame.View
             // Float arguments pick the formatting overload; (ReadOnlySpan<char>, int, int) would be a substring.
             _scoreText.SetText("Score {0} / {1}", (float)_boardView.Score.Score, (float)_level.TargetScore);
             _panel.SetActive(true);
+            if (_effects != null) _effects.PlayOutcome(won);
         }
 
         private void Restart()

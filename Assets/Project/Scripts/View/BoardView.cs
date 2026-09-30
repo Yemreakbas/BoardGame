@@ -38,6 +38,8 @@ namespace BoardGame.View
 
         [Header("Presentation")]
         [SerializeField] private PieceView _piecePrefab;
+        [Tooltip("Optional: particles, beams and sounds for board events.")]
+        [SerializeField] private EffectsView _effects;
         [SerializeField, Min(0.01f)] private float _cellSize = 1f;
         [Tooltip("Keeps an orthographic camera centred on the board and zoomed to fit it on any aspect ratio.")]
         [SerializeField] private bool _fitCamera = true;
@@ -246,6 +248,7 @@ namespace BoardGame.View
             int indexB = _board.ToIndex(targetX, targetY);
             _viewsByCell[indexA].MoveToAndBack(CellToLocal(indexB));
             _viewsByCell[indexB].MoveToAndBack(CellToLocal(indexA));
+            if (_effects != null) _effects.PlayInvalid();
         }
 
         private void HandlePiecesSwapped(int indexA, int indexB)
@@ -256,6 +259,7 @@ namespace BoardGame.View
             _viewsByCell[indexB] = viewA;
             viewA.MoveTo(CellToLocal(indexB));
             viewB.MoveTo(CellToLocal(indexA));
+            if (_effects != null) _effects.PlaySwap();
         }
 
         private void HandlePieceMoved(int fromIndex, int toIndex)
@@ -263,7 +267,7 @@ namespace BoardGame.View
             PieceView view = _viewsByCell[fromIndex];
             _viewsByCell[fromIndex] = null;
             _viewsByCell[toIndex] = view;
-            view.MoveTo(CellToLocal(toIndex));
+            view.MoveTo(CellToLocal(toIndex), MoveStyle.Fall);
         }
 
         private void HandleMatched(ReadOnlySpan<int> matchedIndices)
@@ -273,8 +277,34 @@ namespace BoardGame.View
                 int index = matchedIndices[i];
                 PieceView view = _viewsByCell[index];
                 _viewsByCell[index] = null;
+                if (_effects != null) PlayClearEffects(index, view);
                 view.Pop();
                 _hiddenViews[_hiddenCount++] = view; // Reused by the next refill step, once the pop has finished.
+            }
+            if (_effects != null) _effects.PlayPop(Score.Combo); // ScoreKeeper already counted this wave
+        }
+
+        // Particles for every cleared piece; a beam or a flash when the piece was a special firing.
+        private void PlayClearEffects(int index, PieceView view)
+        {
+            Vector3 local = CellToLocal(index);
+            _effects.Burst(_transform.TransformPoint(local), view.Color);
+
+            Vector3 scale = _transform.lossyScale;
+            switch (view.Special)
+            {
+                case SpecialKind.RowRocket:
+                    _effects.Beam(_transform.TransformPoint(new Vector3(0f, local.y, 0f)), true,
+                        _board.Width * _cellSize * Mathf.Abs(scale.x), view.Color);
+                    break;
+                case SpecialKind.ColumnRocket:
+                    _effects.Beam(_transform.TransformPoint(new Vector3(local.x, 0f, 0f)), false,
+                        _board.Height * _cellSize * Mathf.Abs(scale.y), view.Color);
+                    break;
+                case SpecialKind.ColorBomb:
+                    _effects.Bomb(_transform.TransformPoint(local), _transform.position,
+                        Mathf.Max(_board.Width, _board.Height) * _cellSize * Mathf.Abs(scale.x));
+                    break;
             }
         }
 
@@ -287,7 +317,7 @@ namespace BoardGame.View
             int x = _board.ToX(index);
             int spawnRow = _board.Height + _spawnRowOffset[x]++;
             view.Show(ColorOf(pieceId), Piece.SpecialOf(pieceId), CellToLocal(x, spawnRow));
-            view.MoveTo(CellToLocal(index));
+            view.MoveTo(CellToLocal(index), MoveStyle.Fall);
         }
 
         // Every piece flies from its old cell to its new one. Colors are refreshed too, because a shuffle
