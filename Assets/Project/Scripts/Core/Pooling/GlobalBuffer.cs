@@ -28,6 +28,30 @@ namespace BoardGame.Core.Pooling
         public static readonly bool[] MatchFlags = new bool[MaxCellCount];
 
         /// <summary>
+        /// Written by <see cref="Logic.MatchDetector.FindMatches"/>: every run it found, as first cell index,
+        /// length and stride (1 for a row, the board width for a column). <see cref="RunCount"/> are valid.
+        /// A run needs 3 cells, so there are fewer runs than cells.
+        /// </summary>
+        public static readonly int[] RunStart = new int[MaxCellCount];
+        public static readonly int[] RunLength = new int[MaxCellCount];
+        public static readonly int[] RunStride = new int[MaxCellCount];
+        public static readonly bool[] RunIsRow = new bool[MaxCellCount]; // stride alone is ambiguous on 1-wide boards
+        public static int RunCount;
+
+        /// <summary>Board scratch: cells that receive a new special this step and so must not be cleared.</summary>
+        public static readonly bool[] ProtectedFlags = new bool[MaxCellCount];
+
+        /// <summary>Board scratch: specials waiting to fire. Each cell is queued at most once per step.</summary>
+        public static readonly int[] ActivationQueue = new int[MaxCellCount];
+
+        /// <summary>Board scratch: specials created this step, as (cell index, piece ID) pairs.</summary>
+        public static readonly int[] SpawnIndices = new int[MaxCellCount];
+        public static readonly int[] SpawnPieces = new int[MaxCellCount];
+
+        /// <summary>Board scratch: per-color piece counts, indexed by color (colors fit in 8 bits).</summary>
+        public static readonly int[] ColorCounts = new int[256];
+
+        /// <summary>
         /// Throws if a board of <paramref name="cellCount"/> cells does not fit. Call it during setup:
         /// touching the type there also makes sure the arrays are allocated before gameplay starts.
         /// </summary>

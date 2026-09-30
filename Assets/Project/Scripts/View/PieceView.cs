@@ -1,3 +1,4 @@
+using BoardGame.Core.Logic;
 using UnityEngine;
 
 namespace BoardGame.View
@@ -9,6 +10,8 @@ namespace BoardGame.View
     public sealed class PieceView : MonoBehaviour
     {
         [SerializeField] private SpriteRenderer _renderer;
+        [Tooltip("Overlay drawn on specials: a stripe along a rocket's line, a square on a color bomb.")]
+        [SerializeField] private SpriteRenderer _marker;
         [Tooltip("Travel speed, in board-local units per second.")]
         [SerializeField, Min(0.01f)] private float _moveSpeed = 10f;
         [Tooltip("Seconds a matched piece takes to shrink away.")]
@@ -40,10 +43,10 @@ namespace BoardGame.View
         }
 
         /// <summary>Activates the view with the given look and places it instantly.</summary>
-        public void Show(Color color, Vector3 localPosition)
+        public void Show(Color color, SpecialKind special, Vector3 localPosition)
         {
             gameObject.SetActive(true); // First, so Awake has run even if the prefab was saved inactive.
-            _renderer.color = color;
+            SetLook(color, special);
             _transform.localPosition = localPosition;
             _transform.localScale = Vector3.one;
             _target = localPosition;
@@ -54,7 +57,25 @@ namespace BoardGame.View
         }
 
         /// <summary>Changes the look without moving the view.</summary>
-        public void SetColor(Color color) => _renderer.color = color;
+        public void SetLook(Color color, SpecialKind special)
+        {
+            _renderer.color = color;
+            if (_marker == null) return;
+
+            _marker.enabled = special != SpecialKind.None;
+            switch (special)
+            {
+                case SpecialKind.RowRocket:
+                    _marker.transform.localScale = new Vector3(0.8f, 0.22f, 1f);
+                    break;
+                case SpecialKind.ColumnRocket:
+                    _marker.transform.localScale = new Vector3(0.22f, 0.8f, 1f);
+                    break;
+                case SpecialKind.ColorBomb:
+                    _marker.transform.localScale = new Vector3(0.45f, 0.45f, 1f);
+                    break;
+            }
+        }
 
         /// <summary>Starts pulsing to point out a possible move. Only call on an idle piece.</summary>
         public void StartHint()

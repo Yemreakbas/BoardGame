@@ -29,6 +29,9 @@ namespace BoardGame.View
             new Color(0.61f, 0.35f, 0.71f), // purple
         };
 
+        [Tooltip("Body color of color bombs, which have no piece color of their own.")]
+        [SerializeField] private Color _bombColor = new Color(0.42f, 0.40f, 0.52f);
+
         [Header("Level")]
         [SerializeField, Min(1)] private int _moveLimit = 20;
         [SerializeField, Min(1)] private int _targetScore = 2500;
@@ -105,7 +108,8 @@ namespace BoardGame.View
             for (int index = 0; index < cellCount; index++)
             {
                 PieceView view = Instantiate(_piecePrefab, _transform);
-                view.Show(ColorOf(_board.GetPiece(index)), CellToLocal(index));
+                int piece = _board.GetPiece(index);
+                view.Show(ColorOf(piece), Piece.SpecialOf(piece), CellToLocal(index));
                 _viewsByCell[index] = view;
             }
 
@@ -114,6 +118,7 @@ namespace BoardGame.View
             _board.OnMatched += HandleMatched;
             _board.OnPieceSpawned += HandlePieceSpawned;
             _board.OnShuffled += HandleShuffled;
+            _board.OnSpecialCreated += HandleSpecialCreated;
 
             FitCamera();
         }
@@ -128,6 +133,7 @@ namespace BoardGame.View
             _board.OnMatched -= HandleMatched;
             _board.OnPieceSpawned -= HandlePieceSpawned;
             _board.OnShuffled -= HandleShuffled;
+            _board.OnSpecialCreated -= HandleSpecialCreated;
         }
 
         private void Update()
@@ -280,7 +286,7 @@ namespace BoardGame.View
             // Stack this step's refills above the column so they drop in, in order, from off the board.
             int x = _board.ToX(index);
             int spawnRow = _board.Height + _spawnRowOffset[x]++;
-            view.Show(ColorOf(pieceId), CellToLocal(x, spawnRow));
+            view.Show(ColorOf(pieceId), Piece.SpecialOf(pieceId), CellToLocal(x, spawnRow));
             view.MoveTo(CellToLocal(index));
         }
 
@@ -293,7 +299,8 @@ namespace BoardGame.View
             {
                 PieceView view = _shuffleScratch[sourceIndices[index]];
                 _viewsByCell[index] = view;
-                view.SetColor(ColorOf(_board.GetPiece(index)));
+                int piece = _board.GetPiece(index);
+                view.SetLook(ColorOf(piece), Piece.SpecialOf(piece));
                 view.MoveTo(CellToLocal(index));
             }
         }
@@ -330,7 +337,17 @@ namespace BoardGame.View
             _cameraTransform.position = boardCentre;
         }
 
-        private Color ColorOf(int pieceId) => _pieceColors[pieceId - BoardGenerator.FirstPieceId];
+        private Color ColorOf(int pieceId)
+        {
+            int color = Piece.ColorOf(pieceId);
+            return color == Board.Empty ? _bombColor : _pieceColors[color - BoardGenerator.FirstPieceId];
+        }
+
+        // A run of 4+ turned this piece into a special where it stands: only its look changes.
+        private void HandleSpecialCreated(int index, int pieceId)
+        {
+            _viewsByCell[index].SetLook(ColorOf(pieceId), Piece.SpecialOf(pieceId));
+        }
 
         private Vector3 CellToLocal(int index) => CellToLocal(_board.ToX(index), _board.ToY(index));
 

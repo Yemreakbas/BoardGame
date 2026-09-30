@@ -27,8 +27,17 @@ namespace BoardGame.Core.Logic
         /// <summary>A piece fell from (fromIndex) into the empty cell (toIndex); fromIndex is now empty.</summary>
         public event Action<int, int> OnPieceMoved;
 
-        /// <summary>Cells matched in one resolution step. They are already <see cref="Empty"/> when this is raised.</summary>
+        /// <summary>
+        /// Cells cleared in one resolution step: runs plus everything specials hit. They are already
+        /// <see cref="Empty"/> when this is raised.
+        /// </summary>
         public event MatchedHandler OnMatched;
+
+        /// <summary>
+        /// A run of 4+ turned the piece at (index) into a special (pieceId, see <see cref="Piece"/>) in place,
+        /// instead of clearing it. Raised just before the <see cref="OnMatched"/> of the same step.
+        /// </summary>
+        public event Action<int, int> OnSpecialCreated;
 
         /// <summary>A refill placed a new piece: (index, pieceId).</summary>
         public event Action<int, int> OnPieceSpawned;
@@ -50,6 +59,10 @@ namespace BoardGame.Core.Logic
         private readonly BoardGenerator _generator;
         private bool _hasHoles; // Matches were cleared; the next step collapses and refills.
         private bool _shuffledThisResolve;
+        private int _swapA;                 // cells of the last accepted swap
+        private int _swapB;
+        private bool _isFreshSwap;          // the next clear step is the swap's own, the only one that makes specials
+        private bool _pendingBombSwap;      // the swap involved a color bomb; its clear step fires it
 
         public int Width { get; }
         public int Height { get; }
@@ -93,8 +106,9 @@ namespace BoardGame.Core.Logic
         public bool IsResolving { get; private set; }
 
         /// <summary>
-        /// Swaps two orthogonally adjacent pieces if that creates a match. The board is then resolving:
-        /// drive it with <see cref="ResolveStep"/> (one step per animation beat) or <see cref="ResolveAll"/>.
+        /// Swaps two orthogonally adjacent pieces if that creates a match or involves a color bomb. The board
+        /// is then resolving: drive it with <see cref="ResolveStep"/> (one step per animation beat) or
+        /// <see cref="ResolveAll"/>.
         /// </summary>
         /// <returns>
         /// True if the swap was accepted. A rejected swap (not adjacent, off the board, no match, or the
@@ -108,13 +122,13 @@ namespace BoardGame.Core.Logic
 
             int a = ToIndex(x1, y1);
             int b = ToIndex(x2, y2);
+            if (!MatchDetector.IsAcceptedSwap(_cells, Width, Height, a, b)) return false;
 
             Exchange(a, b);
-            if (MatchDetector.FindMatches(_cells, Width, Height) == 0)
-            {
-                Exchange(a, b); // No match: undo silently, a rejected swap is not a state change.
-                return false;
-            }
+            _swapA = a;
+            _swapB = b;
+            _isFreshSwap = true;
+            _pendingBombSwap = Piece.IsColorBomb(_cells[a]) || Piece.IsColorBomb(_cells[b]);
 
             IsResolving = true;
             OnPiecesSwapped?.Invoke(a, b);
@@ -140,8 +154,10 @@ namespace BoardGame.Core.Logic
 
             // Detection runs here rather than reusing the swap check, so the shared match buffer is never
             // read across an event (listeners may use it too).
+            bool bombSwap = _pendingBombSwap;
+            _pendingBombSwap = false;
             int matchCount = MatchDetector.FindMatches(_cells, Width, Height);
-            if (matchCount == 0)
+            if (matchCount == 0 && !bombSwap)
             {
                 // Settled. A dead board gets one shuffle step (never a second: a board too small to ever
                 // have a move would otherwise shuffle forever).
@@ -159,7 +175,8 @@ namespace BoardGame.Core.Logic
                 return false;
             }
 
-            ClearMatches(matchCount);
+            ClearStep(bombSwap);
+            _isFreshSwap = false;
             _hasHoles = true;
             return true;
         }
@@ -170,11 +187,179 @@ namespace BoardGame.Core.Logic
             while (ResolveStep()) { }
         }
 
-        private void ClearMatches(int matchCount)
+        // One clear step, starting from the cells MatchDetector.FindMatches just flagged:
+        //  1. on the swap's own step, every run of 4+ turns one of its cells into a special (kept, not cleared);
+        //  2. a color-bomb swap flags its targets;
+        //  3. every flagged special fires, flagging more cells, until the chain ends;
+        //  4. flagged cells are emptied: OnSpecialCreated for the new specials, then one OnMatched.
+        private void ClearStep(bool bombSwap)
         {
-            int[] matched = GlobalBuffer.MatchResultIndices;
-            for (int i = 0; i < matchCount; i++) _cells[matched[i]] = Empty;
-            OnMatched?.Invoke(matched.AsSpan(0, matchCount));
+            int cellCount = _cells.Length;
+            bool[] flags = GlobalBuffer.MatchFlags;
+            bool[] protectedCells = GlobalBuffer.ProtectedFlags;
+            Array.Clear(protectedCells, 0, cellCount);
+
+            // Specials form only from the player's own swap, never from cascades: on boards with few colors,
+            // cascade-made specials refill faster than they fire and resolution would never end.
+            int spawnCount = _isFreshSwap ? CreateSpecialsFromRuns(flags, protectedCells) : 0;
+            if (bombSwap) FlagBombSwapTargets(flags, protectedCells);
+
+            // Seed the chain with every special about to be cleared. Bombs that were swapped already did
+            // their job in step 2 and must not fire again.
+            int[] queue = GlobalBuffer.ActivationQueue;
+            int queued = 0;
+            for (int i = 0; i < cellCount; i++)
+            {
+                if (!flags[i] || Piece.SpecialOf(_cells[i]) == SpecialKind.None) continue;
+                if (bombSwap && (i == _swapA || i == _swapB) && Piece.IsColorBomb(_cells[i])) continue;
+                queue[queued++] = i;
+            }
+            for (int head = 0; head < queued; head++) queued = Fire(queue[head], flags, protectedCells, queued);
+
+            int[] results = GlobalBuffer.MatchResultIndices;
+            int count = 0;
+            for (int i = 0; i < cellCount; i++)
+            {
+                if (!flags[i]) continue;
+                results[count++] = i;
+                _cells[i] = Empty;
+            }
+
+            for (int s = 0; s < spawnCount; s++)
+            {
+                int index = GlobalBuffer.SpawnIndices[s];
+                int piece = GlobalBuffer.SpawnPieces[s];
+                _cells[index] = piece;
+                OnSpecialCreated?.Invoke(index, piece);
+            }
+            OnMatched?.Invoke(results.AsSpan(0, count));
+        }
+
+        // A run of 5+ makes a color bomb, a run of 4 a rocket along the run. Returns how many were queued
+        // in GlobalBuffer.SpawnIndices / SpawnPieces; their cells are protected and unflagged.
+        private int CreateSpecialsFromRuns(bool[] flags, bool[] protectedCells)
+        {
+            int spawnCount = 0;
+            for (int run = 0; run < GlobalBuffer.RunCount; run++)
+            {
+                int length = GlobalBuffer.RunLength[run];
+                if (length < 4) continue;
+
+                int cell = PickSpawnCell(GlobalBuffer.RunStart[run], length, GlobalBuffer.RunStride[run], protectedCells);
+                if (cell < 0) continue;
+
+                SpecialKind kind = length >= 5 ? SpecialKind.ColorBomb
+                    : GlobalBuffer.RunIsRow[run] ? SpecialKind.RowRocket : SpecialKind.ColumnRocket;
+                int color = kind == SpecialKind.ColorBomb ? Empty : Piece.ColorOf(_cells[cell]);
+
+                protectedCells[cell] = true;
+                flags[cell] = false;
+                GlobalBuffer.SpawnIndices[spawnCount] = cell;
+                GlobalBuffer.SpawnPieces[spawnCount] = Piece.Make(color, kind);
+                spawnCount++;
+            }
+            return spawnCount;
+        }
+
+        // Where the player moved a piece if that cell is in the run, otherwise the run's middle, otherwise any
+        // cell; never a cell already holding a special (it would vanish without firing) or already reserved.
+        private int PickSpawnCell(int start, int length, int stride, bool[] protectedCells)
+        {
+            for (int j = 0; j < length; j++)
+            {
+                int cell = start + j * stride;
+                if ((cell == _swapA || cell == _swapB) && CanHoldNewSpecial(cell, protectedCells)) return cell;
+            }
+
+            int middle = start + (length - 1) / 2 * stride;
+            if (CanHoldNewSpecial(middle, protectedCells)) return middle;
+
+            for (int j = 0; j < length; j++)
+            {
+                int cell = start + j * stride;
+                if (CanHoldNewSpecial(cell, protectedCells)) return cell;
+            }
+            return -1;
+        }
+
+        private bool CanHoldNewSpecial(int cell, bool[] protectedCells)
+        {
+            return !protectedCells[cell] && Piece.SpecialOf(_cells[cell]) == SpecialKind.None;
+        }
+
+        // A bomb swapped with a piece clears that piece's color; two bombs clear the whole board.
+        private void FlagBombSwapTargets(bool[] flags, bool[] protectedCells)
+        {
+            int a = _cells[_swapA];
+            int b = _cells[_swapB];
+            bool both = Piece.IsColorBomb(a) && Piece.IsColorBomb(b);
+            int color = Piece.IsColorBomb(a) ? Piece.ColorOf(b) : Piece.ColorOf(a);
+
+            if (!protectedCells[_swapA]) flags[_swapA] = true;
+            if (!protectedCells[_swapB]) flags[_swapB] = true;
+            for (int i = 0; i < _cells.Length; i++)
+            {
+                if (protectedCells[i] || _cells[i] == Empty) continue;
+                if (both || Piece.ColorOf(_cells[i]) == color) flags[i] = true;
+            }
+        }
+
+        // Fires the special at `index`, flagging the cells it hits and queueing any special among them.
+        // Returns the new queue length.
+        private int Fire(int index, bool[] flags, bool[] protectedCells, int queued)
+        {
+            switch (Piece.SpecialOf(_cells[index]))
+            {
+                case SpecialKind.RowRocket:
+                {
+                    int rowStart = ToY(index) * Width;
+                    for (int x = 0; x < Width; x++) queued = FlagHit(rowStart + x, flags, protectedCells, queued);
+                    break;
+                }
+                case SpecialKind.ColumnRocket:
+                {
+                    for (int y = 0; y < Height; y++) queued = FlagHit(ToX(index) + y * Width, flags, protectedCells, queued);
+                    break;
+                }
+                case SpecialKind.ColorBomb:
+                {
+                    // Hit by a rocket, a bomb takes out the most common color left on the board.
+                    int color = MostCommonUnflaggedColor(flags, protectedCells);
+                    if (color == Empty) break;
+                    for (int i = 0; i < _cells.Length; i++)
+                    {
+                        if (Piece.ColorOf(_cells[i]) == color) queued = FlagHit(i, flags, protectedCells, queued);
+                    }
+                    break;
+                }
+            }
+            return queued;
+        }
+
+        private int FlagHit(int index, bool[] flags, bool[] protectedCells, int queued)
+        {
+            if (flags[index] || protectedCells[index] || _cells[index] == Empty) return queued;
+            flags[index] = true;
+            if (Piece.SpecialOf(_cells[index]) != SpecialKind.None) GlobalBuffer.ActivationQueue[queued++] = index;
+            return queued;
+        }
+
+        private int MostCommonUnflaggedColor(bool[] flags, bool[] protectedCells)
+        {
+            int[] counts = GlobalBuffer.ColorCounts;
+            Array.Clear(counts, 0, counts.Length);
+            for (int i = 0; i < _cells.Length; i++)
+            {
+                if (!flags[i] && !protectedCells[i]) counts[Piece.ColorOf(_cells[i])]++;
+            }
+            counts[Empty] = 0; // empty cells and color bombs are colorless
+
+            int best = Empty;
+            for (int color = 1; color < counts.Length; color++)
+            {
+                if (counts[color] > counts[best]) best = color;
+            }
+            return best;
         }
 
         // Moves the column's pieces down over the empty cells below them, keeping their order.

@@ -1637,6 +1637,7 @@ MonoBehaviour:
   - {r: 0.18, g: 0.8, b: 0.44, a: 1}
   - {r: 0.2, g: 0.6, b: 0.86, a: 1}
   - {r: 0.61, g: 0.35, b: 0.71, a: 1}
+  _bombColor: {r: 0.42, g: 0.4, b: 0.52, a: 1}
   _moveLimit: 20
   _targetScore: 2500
   _piecePrefab: {fileID: 6370913756041358673, guid: 8daa8a80b075be043b0055e739e77f98, type: 3}
