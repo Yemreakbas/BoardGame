@@ -23,6 +23,13 @@ namespace BoardGame.View
         [SerializeField] private TMP_Text _buttonLabel;
         [Tooltip("Optional: plays the win or lose jingle.")]
         [SerializeField] private EffectsView _effects;
+        [Tooltip("Optional: three star images, lit for the stars earned (hidden after a loss).")]
+        [SerializeField] private Image[] _stars = new Image[0];
+        [SerializeField] private Color _starEarned = new Color(1f, 0.82f, 0.2f);
+        [SerializeField] private Color _starEmpty = new Color(1f, 1f, 1f, 0.18f);
+        [Tooltip("Optional: goes back to the level select scene.")]
+        [SerializeField] private Button _menuButton;
+        [SerializeField] private string _menuScene = "LevelSelect";
 
         private LevelState _level;
 
@@ -45,19 +52,29 @@ namespace BoardGame.View
             _level = _boardView.Level;
             _level.OnOutcomeChanged += Show;
             _restartButton.onClick.AddListener(Restart);
+            if (_menuButton != null) _menuButton.onClick.AddListener(OpenMenu);
         }
 
         private void OnDestroy()
         {
             if (_level != null) _level.OnOutcomeChanged -= Show;
             if (_restartButton != null) _restartButton.onClick.RemoveListener(Restart);
+            if (_menuButton != null) _menuButton.onClick.RemoveListener(OpenMenu);
         }
 
         private void Show()
         {
             bool won = _level.Outcome == LevelOutcome.Won;
             bool hasLevels = _boardView.LevelCount > 0;
+            int stars = won ? LevelProgress.StarsFor(_level.MovesLeft, _level.MoveLimit) : 0;
+            if (won && hasLevels) LevelProgress.RecordStars(_boardView.LevelNumber - 1, stars); // before advancing
             bool finishedAll = won && hasLevels && LevelProgress.CompleteCurrent(_boardView.LevelCount);
+
+            for (int i = 0; i < _stars.Length; i++)
+            {
+                _stars[i].enabled = won;
+                _stars[i].color = i < stars ? _starEarned : _starEmpty;
+            }
 
             if (!won) _titleText.SetText("Out of Moves");
             else if (finishedAll) _titleText.SetText("All Levels Complete!");
@@ -82,6 +99,11 @@ namespace BoardGame.View
         private void Restart()
         {
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+        }
+
+        private void OpenMenu()
+        {
+            SceneManager.LoadScene(_menuScene);
         }
     }
 }
