@@ -10,6 +10,7 @@ namespace BoardGame.View
         {
             // Mobile defaults to 30 fps, which makes swipes and falls look choppy.
             Application.targetFrameRate = 60;
+            SoundSettings.Apply();
         }
     }
 }
