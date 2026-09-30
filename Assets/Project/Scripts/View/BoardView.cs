@@ -71,6 +71,12 @@ namespace BoardGame.View
         /// <summary>One-based number of the level being played (1 without a catalog).</summary>
         public int LevelNumber { get; private set; } = 1;
 
+        /// <summary>
+        /// While true the board ignores the pointer and does not advance resolution. Input is read from the
+        /// pointer directly, so UI panels on top cannot block it by themselves.
+        /// </summary>
+        public bool IsPaused { get; set; }
+
         private Board _board;
         private Transform _transform;
         private Transform _cameraTransform;
@@ -166,6 +172,12 @@ namespace BoardGame.View
         private void Update()
         {
             if (_fitCamera && _camera.aspect != _fittedAspect) FitCamera(); // Rotation or window resize.
+
+            if (IsPaused)
+            {
+                _isSwiping = false;
+                return;
+            }
 
             if (_board.IsResolving)
             {
