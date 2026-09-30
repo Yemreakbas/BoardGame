@@ -44,6 +44,11 @@ namespace BoardGame.View
         [Tooltip("Faint cell checker. The project renders in linear space, where small alphas already read strongly.")]
         [SerializeField] private Color _cellColorA = new Color(1f, 1f, 1f, 0.018f);
         [SerializeField] private Color _cellColorB = new Color(1f, 1f, 1f, 0.008f);
+        [Tooltip("Soft radial glow sprite for the aura behind the board.")]
+        [SerializeField] private Sprite _glowSprite;
+        [Tooltip("Additive (pulsing) glow material for the board aura.")]
+        [SerializeField] private Material _auraMaterial;
+        [SerializeField] private Color _auraColor = new Color(0.55f, 0.42f, 1f, 0.55f);
         [Tooltip("Seconds between the first and the last piece of the opening drop.")]
         [SerializeField, Min(0f)] private float _introDropSpread = 0.55f;
         [Tooltip("Ice tint; alpha is the one-layer strength, thicker ice is more opaque.")]
@@ -414,8 +419,11 @@ namespace BoardGame.View
             _lastScore = Score.Score;
             if (_effects == null || matchedIndices.Length == 0) return;
 
+            Vector3 middle = _transform.TransformPoint(centre / matchedIndices.Length);
             _effects.PlayPop(Score.Combo);
-            _effects.ScorePopup(_transform.TransformPoint(centre / matchedIndices.Length), points, Score.Combo);
+            _effects.ScorePopup(middle, points, Score.Combo);
+            _effects.Shockwave(middle, new Color(1f, 0.95f, 0.8f, 0.9f), 1.4f + 0.18f * matchedIndices.Length, 0.35f);
+            _effects.Sparkle(middle, new Color(1f, 0.85f, 0.35f), 3 + 3 * Score.Combo);
             if (Score.Combo >= 3) _effects.Shake(0.035f * Score.Combo, 0.25f);
         }
 
@@ -431,16 +439,20 @@ namespace BoardGame.View
                 case SpecialKind.RowRocket:
                     _effects.Beam(_transform.TransformPoint(new Vector3(0f, local.y, 0f)), true,
                         _board.Width * _cellSize * Mathf.Abs(scale.x), view.Color);
+                    _effects.Shockwave(_transform.TransformPoint(local), view.Color, 3f, 0.4f);
                     _effects.Shake(0.12f, 0.22f);
                     break;
                 case SpecialKind.ColumnRocket:
                     _effects.Beam(_transform.TransformPoint(new Vector3(local.x, 0f, 0f)), false,
                         _board.Height * _cellSize * Mathf.Abs(scale.y), view.Color);
+                    _effects.Shockwave(_transform.TransformPoint(local), view.Color, 3f, 0.4f);
                     _effects.Shake(0.12f, 0.22f);
                     break;
                 case SpecialKind.ColorBomb:
-                    _effects.Bomb(_transform.TransformPoint(local), _transform.position,
-                        Mathf.Max(_board.Width, _board.Height) * _cellSize * Mathf.Abs(scale.x));
+                    float boardSize = Mathf.Max(_board.Width, _board.Height) * _cellSize * Mathf.Abs(scale.x);
+                    _effects.Bomb(_transform.TransformPoint(local), _transform.position, boardSize);
+                    _effects.Shockwave(_transform.TransformPoint(local), Color.white, boardSize * 1.3f, 0.6f);
+                    _effects.Sparkle(_transform.TransformPoint(local), Color.white, 30);
                     _effects.Shake(0.32f, 0.45f);
                     break;
             }
@@ -527,7 +539,9 @@ namespace BoardGame.View
             view.Punch();
             if (_effects != null)
             {
-                _effects.Burst(_transform.TransformPoint(CellToLocal(index)), new Color(0.8f, 0.82f, 0.88f), 10);
+                Vector3 at = _transform.TransformPoint(CellToLocal(index));
+                _effects.Burst(at, new Color(0.8f, 0.82f, 0.88f), 10);
+                _effects.Shockwave(at, new Color(0.85f, 0.88f, 1f, 0.8f), 1.6f, 0.3f);
                 _effects.PlayUnlock();
             }
             LocksChanged?.Invoke();
@@ -538,7 +552,9 @@ namespace BoardGame.View
             UpdateIceTile(index);
             if (_effects != null)
             {
-                _effects.Burst(_transform.TransformPoint(CellToLocal(index)), Color.white, 10);
+                Vector3 at = _transform.TransformPoint(CellToLocal(index));
+                _effects.Burst(at, Color.white, 10);
+                _effects.Sparkle(at, new Color(0.7f, 0.92f, 1f), 4);
                 _effects.PlayIce();
             }
             IceChanged?.Invoke();
@@ -563,7 +579,10 @@ namespace BoardGame.View
             view.SetLook(ColorOf(pieceId), Piece.SpecialOf(pieceId));
             view.Punch();
             if (_effects == null) return;
-            _effects.Burst(_transform.TransformPoint(CellToLocal(index)), Color.white, 14);
+            Vector3 at = _transform.TransformPoint(CellToLocal(index));
+            _effects.Burst(at, Color.white, 14);
+            _effects.Shockwave(at, ColorOf(pieceId), 2.2f, 0.4f);
+            _effects.Sparkle(at, Color.white, 10);
             _effects.PlaySpecialCreated();
         }
 
@@ -571,6 +590,19 @@ namespace BoardGame.View
         // the camera. Setup only: these objects never change afterwards (the backdrop is resized in FitCamera).
         private void BuildBackdrop(int cellCount)
         {
+            if (_glowSprite != null && _auraMaterial != null)
+            {
+                // A soft, breathing aura spilling out around the plate.
+                var aura = new GameObject("BoardAura").AddComponent<SpriteRenderer>();
+                aura.transform.SetParent(_transform, false);
+                aura.sprite = _glowSprite;
+                aura.sharedMaterial = _auraMaterial;
+                aura.color = _auraColor;
+                aura.sortingOrder = -4;
+                Vector3 glowSize = _glowSprite.bounds.size;
+                aura.transform.localScale = new Vector3(_board.Width * _cellSize * 1.7f / glowSize.x, _board.Height * _cellSize * 1.7f / glowSize.y, 1f);
+            }
+
             if (_tileSprite != null)
             {
                 float margin = 0.22f * _cellSize;

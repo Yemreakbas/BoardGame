@@ -41,6 +41,20 @@ namespace BoardGame.View
         private AudioClip _specialClip, _unlockClip, _iceClip, _starClip;
         private int _iceSoundFrame = -1, _unlockSoundFrame = -1; // one of each per frame, however many cells
 
+        [Header("Glow")]
+        [Tooltip("Additive HDR material (BoardGame/AdditiveGlow) for beams, flash and shockwave rings, so Bloom lights them up.")]
+        [SerializeField] private Material _glowMaterial;
+        [SerializeField] private Sprite _ringSprite;
+        [Tooltip("Optional second particle system for star-shaped sparkles (give it a glowing star material).")]
+        [SerializeField] private ParticleSystem _sparkles;
+        private const int RingCount = 10;
+        private SpriteRenderer[] _rings;
+        private float[] _ringTime;
+        private float[] _ringDuration;
+        private float[] _ringSize;
+        private Color[] _ringColor;
+        private int _nextRing;
+
         [Header("Screen shake")]
         [Tooltip("Camera to shake; falls back to Camera.main.")]
         [SerializeField] private Camera _camera;
@@ -94,6 +108,19 @@ namespace BoardGame.View
 
             if (_camera == null) _camera = Camera.main;
             if (_camera != null) _cameraTransform = _camera.transform;
+
+            _rings = new SpriteRenderer[RingCount];
+            _ringTime = new float[RingCount];
+            _ringDuration = new float[RingCount];
+            _ringSize = new float[RingCount];
+            _ringColor = new Color[RingCount];
+            for (int i = 0; i < RingCount; i++)
+            {
+                _rings[i] = CreateSprite("Ring" + i, 18);
+                _rings[i].sprite = _ringSprite;
+                _ringTime[i] = -1f;
+            }
+            if (_sparkles != null) _sparkles.Play();
 
             _popups = new TextMeshPro[PopupCount];
             _popupTime = new float[PopupCount];
@@ -159,6 +186,50 @@ namespace BoardGame.View
             }
         }
 
+        /// <summary>A glowing ring that bursts out from <paramref name="worldPosition"/> to <paramref name="size"/> units and fades.</summary>
+        public void Shockwave(Vector3 worldPosition, Color color, float size, float duration = 0.4f)
+        {
+            if (_ringSprite == null) return;
+            int slot = _nextRing;
+            _nextRing = (_nextRing + 1) % RingCount;
+            _rings[slot].transform.position = worldPosition;
+            _rings[slot].enabled = true;
+            _ringTime[slot] = 0f;
+            _ringDuration[slot] = duration;
+            _ringSize[slot] = size;
+            _ringColor[slot] = color;
+            UpdateRing(slot, 0f);
+        }
+
+        /// <summary>Star-shaped sparkles flying out of <paramref name="worldPosition"/>.</summary>
+        public void Sparkle(Vector3 worldPosition, Color color, int count)
+        {
+            if (_sparkles == null) return;
+            _emit.position = worldPosition;
+            _emit.startColor = color;
+            for (int i = 0; i < count; i++)
+            {
+                _emit.velocity = Random.insideUnitCircle.normalized * Random.Range(2f, 6f);
+                _emit.startSize = Random.Range(0.35f, 0.65f);
+                _emit.startLifetime = Random.Range(0.45f, 0.85f);
+                _emit.rotation = Random.Range(0f, 360f);
+                _emit.angularVelocity = Random.Range(-360f, 360f);
+                _sparkles.Emit(_emit, 1);
+            }
+            _emit.rotation = 0f;
+            _emit.angularVelocity = 0f;
+        }
+
+        // Fast ease-out growth; bright at first, fading to nothing.
+        private void UpdateRing(int i, float t)
+        {
+            float grow = 1f - (1f - t) * (1f - t) * (1f - t);
+            _rings[i].transform.localScale = Vector3.one * Mathf.Lerp(0.15f, _ringSize[i], grow);
+            Color color = _ringColor[i];
+            color.a *= 1f - t;
+            _rings[i].color = color;
+        }
+
         /// <summary>Confetti across the top of the view, for a win.</summary>
         public void Celebrate()
         {
@@ -203,6 +274,20 @@ namespace BoardGame.View
                 }
             }
 
+            for (int i = 0; i < RingCount; i++)
+            {
+                if (_ringTime[i] < 0f) continue;
+                _ringTime[i] += Time.deltaTime;
+                float t = _ringTime[i] / _ringDuration[i];
+                if (t >= 1f)
+                {
+                    _ringTime[i] = -1f;
+                    _rings[i].enabled = false;
+                    continue;
+                }
+                UpdateRing(i, t);
+            }
+
             for (int i = 0; i < PopupCount; i++)
             {
                 if (_popupTime[i] < 0f) continue;
@@ -232,7 +317,7 @@ namespace BoardGame.View
             {
                 Vector2 direction = Random.insideUnitCircle.normalized;
                 _emit.velocity = direction * (_burstSpeed * Random.Range(0.5f, 1f)) + Vector2.up * 1.5f;
-                _emit.startSize = Random.Range(0.18f, 0.3f);
+                _emit.startSize = Random.Range(0.3f, 0.5f); // soft glow dots read smaller than their size
                 _emit.startLifetime = Random.Range(0.35f, 0.6f);
                 _particles.Emit(_emit, 1);
             }
@@ -321,6 +406,7 @@ namespace BoardGame.View
             var renderer = go.AddComponent<SpriteRenderer>();
             renderer.sprite = _sprite;
             renderer.sortingOrder = sortingOrder;
+            if (_glowMaterial != null) renderer.sharedMaterial = _glowMaterial;
             renderer.enabled = false;
             return renderer;
         }

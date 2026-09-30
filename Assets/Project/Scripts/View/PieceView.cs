@@ -21,6 +21,10 @@ namespace BoardGame.View
         [SerializeField] private SpriteRenderer _marker;
         [Tooltip("Overlay drawn while the piece is locked.")]
         [SerializeField] private SpriteRenderer _lockOverlay;
+        [Tooltip("Pulsing halo behind specials (a glow sprite with the pulsing additive material).")]
+        [SerializeField] private SpriteRenderer _glow;
+
+        private Color _bodyColor;      // the piece color; the pop flashes toward white from it
 
         [Header("Motion")]
         [Tooltip("Seconds for a one-cell swap; longer trips scale with the square root of the distance.")]
@@ -104,7 +108,13 @@ namespace BoardGame.View
         public void SetLook(Color color, SpecialKind special)
         {
             Special = special;
+            _bodyColor = color;
             _renderer.color = color;
+            if (_glow != null)
+            {
+                _glow.enabled = special != SpecialKind.None;
+                _glow.color = special == SpecialKind.ColorBomb ? Color.white : Color.Lerp(color, Color.white, 0.25f);
+            }
             if (_marker == null) return;
 
             _marker.enabled = special != SpecialKind.None;
@@ -282,12 +292,14 @@ namespace BoardGame.View
                     if (t >= 1f)
                     {
                         SetIdle();
+                        _renderer.color = _bodyColor;
                         gameObject.SetActive(false);
                         break;
                     }
-                    // Swell to 1 + _popSwell over the first 30%, then shrink to nothing.
+                    // Swell to 1 + _popSwell over the first 30% while flashing white, then shrink to nothing.
                     float scale = t < 0.3f ? 1f + _popSwell * (t / 0.3f) : (1f + _popSwell) * (1f - (t - 0.3f) / 0.7f);
                     _transform.localScale = Vector3.one * scale;
+                    _renderer.color = Color.Lerp(_bodyColor, Color.white, t < 0.3f ? t / 0.3f * 0.85f : 0.85f);
                     break;
                 }
                 default:
