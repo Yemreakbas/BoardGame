@@ -15,6 +15,8 @@ namespace BoardGame.View
         [SerializeField] private TMP_Text _movesText;
         [Tooltip("Shown only while a move chains two or more cascade waves.")]
         [SerializeField] private TMP_Text _comboText;
+        [Tooltip("Optional: shows the level number (set once, it does not change during play).")]
+        [SerializeField] private TMP_Text _levelText;
 
         private ScoreKeeper _score;
         private LevelState _level;
@@ -33,6 +35,11 @@ namespace BoardGame.View
             _level = _boardView.Level;
             _score.OnChanged += Refresh;
             Refresh();
+
+            if (_levelText != null)
+            {
+                _levelText.SetText("Level {0} / {1}", (float)_boardView.LevelNumber, (float)Mathf.Max(1, _boardView.LevelCount));
+            }
         }
 
         private void OnDestroy()

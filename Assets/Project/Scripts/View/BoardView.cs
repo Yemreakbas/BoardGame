@@ -1,5 +1,6 @@
 using System;
 using BoardGame.Core.Logic;
+using BoardGame.Levels;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -19,7 +20,7 @@ namespace BoardGame.View
         [SerializeField, Min(3)] private int _height = 8;
         [Tooltip("Same seed, same session. 0 picks a new seed every run.")]
         [SerializeField] private int _seed;
-        [Tooltip("One color per piece type; the entry count is the number of types (at least 3).")]
+        [Tooltip("Palette, one color per piece type. Without a catalog every entry is in play; a level uses its first ColorCount.")]
         [SerializeField] private Color[] _pieceColors =
         {
             new Color(0.91f, 0.30f, 0.24f), // red
@@ -27,12 +28,16 @@ namespace BoardGame.View
             new Color(0.18f, 0.80f, 0.44f), // green
             new Color(0.20f, 0.60f, 0.86f), // blue
             new Color(0.61f, 0.35f, 0.71f), // purple
+            new Color(0.98f, 0.55f, 0.16f), // orange
+            new Color(0.20f, 0.85f, 0.85f), // cyan
         };
 
         [Tooltip("Body color of color bombs, which have no piece color of their own.")]
         [SerializeField] private Color _bombColor = new Color(0.42f, 0.40f, 0.52f);
 
         [Header("Level")]
+        [Tooltip("When set, board size, colors, moves and target come from the player's current level; the fields below are ignored.")]
+        [SerializeField] private LevelCatalog _catalog;
         [SerializeField, Min(1)] private int _moveLimit = 20;
         [SerializeField, Min(1)] private int _targetScore = 2500;
 
@@ -59,6 +64,12 @@ namespace BoardGame.View
 
         /// <summary>Move limit, target and outcome of the running level; created in Awake, like <see cref="Score"/>.</summary>
         public LevelState Level { get; private set; }
+
+        /// <summary>Levels in the catalog; 0 when playing the inspector settings without one.</summary>
+        public int LevelCount => _catalog != null ? _catalog.Count : 0;
+
+        /// <summary>One-based number of the level being played (1 without a catalog).</summary>
+        public int LevelNumber { get; private set; } = 1;
 
         private Board _board;
         private Transform _transform;
@@ -94,10 +105,24 @@ namespace BoardGame.View
             _transform = transform;
             _cameraTransform = _camera.transform;
 
-            int seed = _seed != 0 ? _seed : Environment.TickCount;
-            _board = new Board(_width, _height, new BoardGenerator(_pieceColors.Length, seed));
+            int width = _width, height = _height, colors = _pieceColors.Length;
+            int moveLimit = _moveLimit, targetScore = _targetScore, seed = _seed;
+            LevelDefinition level = LevelCount > 0 ? _catalog.Get(LevelProgress.CurrentIndex) : null;
+            if (level != null)
+            {
+                LevelNumber = Mathf.Clamp(LevelProgress.CurrentIndex, 0, LevelCount - 1) + 1;
+                width = level.Width;
+                height = level.Height;
+                colors = Mathf.Clamp(level.ColorCount, BoardGenerator.MinPieceTypeCount, _pieceColors.Length);
+                moveLimit = level.MoveLimit;
+                targetScore = level.TargetScore;
+                seed = level.Seed;
+            }
+            if (seed == 0) seed = Environment.TickCount;
+
+            _board = new Board(width, height, new BoardGenerator(colors, seed));
             Score = new ScoreKeeper(_board);
-            Level = new LevelState(_board, Score, _moveLimit, _targetScore);
+            Level = new LevelState(_board, Score, moveLimit, targetScore);
 
             int cellCount = _board.CellCount;
             _viewsByCell = new PieceView[cellCount];

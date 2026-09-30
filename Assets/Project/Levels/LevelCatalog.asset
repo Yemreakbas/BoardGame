@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 17750b1af18a42248af625157cbb0081, type: 3}
+  m_Name: LevelCatalog
+  m_EditorClassIdentifier: Assembly-CSharp::BoardGame.Levels.LevelCatalog
+  _levels:
+  - {fileID: 11400000, guid: 1f754ac6c14d81a4a8b8e9f194cda9da, type: 2}
+  - {fileID: 11400000, guid: a9ace43e2604b5f48aa5ae3a17f2e99e, type: 2}
+  - {fileID: 11400000, guid: 2b4431b9be69a124cacd22671241167f, type: 2}
+  - {fileID: 11400000, guid: 5525c7deac9561a4db27e0b879a05de5, type: 2}
+  - {fileID: 11400000, guid: 23136d67dae9def499a81b5578157fb7, type: 2}
+  - {fileID: 11400000, guid: 6057e8b95d173d948ade248be401d0b3, type: 2}
+  - {fileID: 11400000, guid: 64a4df694cedd7a4ea0cb4f5587c6fb7, type: 2}
+  - {fileID: 11400000, guid: 3577c47e835eb884ca36aeb3fe8e9ccc, type: 2}
+  - {fileID: 11400000, guid: ead0a46b692aa0646b1b0c29b5eca12e, type: 2}
+  - {fileID: 11400000, guid: c2c9356616d64154bbdd1db99782990a, type: 2}
