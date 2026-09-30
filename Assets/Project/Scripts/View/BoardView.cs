@@ -36,6 +36,16 @@ namespace BoardGame.View
         [SerializeField] private Color _bombColor = new Color(0.42f, 0.40f, 0.52f);
         [Tooltip("Sprite drawn under pieces on iced cells.")]
         [SerializeField] private Sprite _iceSprite;
+        [Tooltip("9-sliced rounded tile for the board plate and its cells.")]
+        [SerializeField] private Sprite _tileSprite;
+        [Tooltip("Full-screen backdrop that follows the camera (a vertical gradient).")]
+        [SerializeField] private Sprite _backgroundSprite;
+        [SerializeField] private Color _plateColor = new Color(0.10f, 0.10f, 0.17f, 0.92f);
+        [Tooltip("Faint cell checker. The project renders in linear space, where small alphas already read strongly.")]
+        [SerializeField] private Color _cellColorA = new Color(1f, 1f, 1f, 0.018f);
+        [SerializeField] private Color _cellColorB = new Color(1f, 1f, 1f, 0.008f);
+        [Tooltip("Seconds between the first and the last piece of the opening drop.")]
+        [SerializeField, Min(0f)] private float _introDropSpread = 0.55f;
         [Tooltip("Ice tint; alpha is the one-layer strength, thicker ice is more opaque.")]
         [SerializeField] private Color _iceColor = new Color(0.72f, 0.9f, 1f, 0.35f);
 
@@ -109,6 +119,9 @@ namespace BoardGame.View
         private int[] _spawnRowOffset;       // per column: refills already stacked above the board this step
         private PieceView[] _shuffleScratch; // copy of _viewsByCell while a shuffle remaps it
         private SpriteRenderer[] _iceTiles;  // per cell; null where the level has no ice
+        private SpriteRenderer _background;
+        private PieceView _pressedView;      // the piece under the finger, shown slightly larger
+        private int _lastScore;              // score before the current wave, for the "+points" popup
         private float _fittedAspect;         // camera aspect the fit was computed for; 0 forces a refit
 
         private bool _isSwiping;
@@ -191,13 +204,19 @@ namespace BoardGame.View
                 UpdateIceTile(index);
             }
 
-            // The only instantiation in the game: one view per cell, recycled from here on.
+            BuildBackdrop(cellCount);
+
+            // The only instantiation in the game: one view per cell, recycled from here on. Pieces start above
+            // the board and rain down in a diagonal wave, bottom-left first.
+            float waveSteps = Mathf.Max(1f, _board.Width + _board.Height - 2);
             for (int index = 0; index < cellCount; index++)
             {
                 PieceView view = Instantiate(_piecePrefab, _transform);
                 int piece = _board.GetPiece(index);
-                view.Show(ColorOf(piece), Piece.SpecialOf(piece), CellToLocal(index));
+                int x = _board.ToX(index), y = _board.ToY(index);
+                view.Show(ColorOf(piece), Piece.SpecialOf(piece), CellToLocal(x, y + _board.Height + 1));
                 view.SetLocked(Piece.IsLocked(piece));
+                view.MoveTo(CellToLocal(index), MoveStyle.Fall, _introDropSpread * (x + y) / waveSteps);
                 _viewsByCell[index] = view;
             }
 
@@ -320,6 +339,16 @@ namespace BoardGame.View
             _swipeX = x;
             _swipeY = y;
             _swipeStart = local;
+            _pressedView = _viewsByCell[_board.ToIndex(x, y)];
+            _pressedView.SetPressed(true);
+        }
+
+        // Releases the pressed piece as soon as the swipe ends, whatever ended it (swap, release, pause, ...).
+        private void LateUpdate()
+        {
+            if (_pressedView == null || _isSwiping) return;
+            _pressedView.SetPressed(false);
+            _pressedView = null;
         }
 
         private void TrackSwipe(Vector2 screenPosition)
@@ -368,17 +397,26 @@ namespace BoardGame.View
 
         private void HandleMatched(ReadOnlySpan<int> matchedIndices)
         {
+            Vector3 centre = Vector3.zero;
             for (int i = 0; i < matchedIndices.Length; i++)
             {
                 int index = matchedIndices[i];
                 PieceView view = _viewsByCell[index];
                 _viewsByCell[index] = null;
+                centre += CellToLocal(index);
                 if (_effects != null) PlayClearEffects(index, view);
                 view.Pop();
                 _hiddenViews[_hiddenCount++] = view; // Reused by the next refill step, once the pop has finished.
             }
+
             // ScoreKeeper already counted this wave; a wave that only broke locks clears nothing to pop.
-            if (_effects != null && matchedIndices.Length > 0) _effects.PlayPop(Score.Combo);
+            int points = Score.Score - _lastScore;
+            _lastScore = Score.Score;
+            if (_effects == null || matchedIndices.Length == 0) return;
+
+            _effects.PlayPop(Score.Combo);
+            _effects.ScorePopup(_transform.TransformPoint(centre / matchedIndices.Length), points, Score.Combo);
+            if (Score.Combo >= 3) _effects.Shake(0.035f * Score.Combo, 0.25f);
         }
 
         // Particles for every cleared piece; a beam or a flash when the piece was a special firing.
@@ -393,14 +431,17 @@ namespace BoardGame.View
                 case SpecialKind.RowRocket:
                     _effects.Beam(_transform.TransformPoint(new Vector3(0f, local.y, 0f)), true,
                         _board.Width * _cellSize * Mathf.Abs(scale.x), view.Color);
+                    _effects.Shake(0.12f, 0.22f);
                     break;
                 case SpecialKind.ColumnRocket:
                     _effects.Beam(_transform.TransformPoint(new Vector3(local.x, 0f, 0f)), false,
                         _board.Height * _cellSize * Mathf.Abs(scale.y), view.Color);
+                    _effects.Shake(0.12f, 0.22f);
                     break;
                 case SpecialKind.ColorBomb:
                     _effects.Bomb(_transform.TransformPoint(local), _transform.position,
                         Mathf.Max(_board.Width, _board.Height) * _cellSize * Mathf.Abs(scale.x));
+                    _effects.Shake(0.32f, 0.45f);
                     break;
             }
         }
@@ -463,6 +504,14 @@ namespace BoardGame.View
             Vector3 boardCentre = _transform.position;
             boardCentre.z = _cameraTransform.position.z;
             _cameraTransform.position = boardCentre;
+
+            if (_background != null)
+            {
+                // Cover the whole view, with a little slack for screen shake.
+                Vector2 view = new Vector2(2f * _camera.orthographicSize * _fittedAspect, 2f * _camera.orthographicSize) * 1.1f;
+                Vector3 sprite = _background.sprite.bounds.size;
+                _background.transform.localScale = new Vector3(view.x / sprite.x, view.y / sprite.y, 1f);
+            }
         }
 
         private Color ColorOf(int pieceId)
@@ -475,14 +524,23 @@ namespace BoardGame.View
         {
             PieceView view = _viewsByCell[index];
             view.SetLocked(false);
-            if (_effects != null) _effects.Burst(_transform.TransformPoint(CellToLocal(index)), new Color(0.8f, 0.82f, 0.88f), 10);
+            view.Punch();
+            if (_effects != null)
+            {
+                _effects.Burst(_transform.TransformPoint(CellToLocal(index)), new Color(0.8f, 0.82f, 0.88f), 10);
+                _effects.PlayUnlock();
+            }
             LocksChanged?.Invoke();
         }
 
         private void HandleIceChanged(int index, int layersLeft)
         {
             UpdateIceTile(index);
-            if (_effects != null) _effects.Burst(_transform.TransformPoint(CellToLocal(index)), Color.white, 10);
+            if (_effects != null)
+            {
+                _effects.Burst(_transform.TransformPoint(CellToLocal(index)), Color.white, 10);
+                _effects.PlayIce();
+            }
             IceChanged?.Invoke();
         }
 
@@ -498,10 +556,57 @@ namespace BoardGame.View
             tile.color = color;
         }
 
-        // A run of 4+ turned this piece into a special where it stands: only its look changes.
+        // A run of 4+ turned this piece into a special where it stands: new look, a punch and a chime.
         private void HandleSpecialCreated(int index, int pieceId)
         {
-            _viewsByCell[index].SetLook(ColorOf(pieceId), Piece.SpecialOf(pieceId));
+            PieceView view = _viewsByCell[index];
+            view.SetLook(ColorOf(pieceId), Piece.SpecialOf(pieceId));
+            view.Punch();
+            if (_effects == null) return;
+            _effects.Burst(_transform.TransformPoint(CellToLocal(index)), Color.white, 14);
+            _effects.PlaySpecialCreated();
+        }
+
+        // Board plate with a faint checker of cells behind the pieces, and a gradient backdrop that follows
+        // the camera. Setup only: these objects never change afterwards (the backdrop is resized in FitCamera).
+        private void BuildBackdrop(int cellCount)
+        {
+            if (_tileSprite != null)
+            {
+                float margin = 0.22f * _cellSize;
+                SpriteRenderer plate = CreateTile("BoardPlate", Vector3.zero, -3, _plateColor);
+                plate.size = new Vector2(_board.Width * _cellSize + 2f * margin, _board.Height * _cellSize + 2f * margin);
+
+                for (int index = 0; index < cellCount; index++)
+                {
+                    int x = _board.ToX(index), y = _board.ToY(index);
+                    SpriteRenderer cell = CreateTile("Cell", CellToLocal(index), -2, (x + y) % 2 == 0 ? _cellColorA : _cellColorB);
+                    cell.size = Vector2.one * (_cellSize * 0.94f);
+                }
+            }
+
+            if (_backgroundSprite != null)
+            {
+                var go = new GameObject("Backdrop");
+                go.transform.SetParent(_cameraTransform, false);
+                go.transform.localPosition = new Vector3(0f, 0f, 60f); // far behind the board, still inside the clip range
+                _background = go.AddComponent<SpriteRenderer>();
+                _background.sprite = _backgroundSprite;
+                _background.sortingOrder = -10;
+            }
+        }
+
+        private SpriteRenderer CreateTile(string name, Vector3 localPosition, int sortingOrder, Color color)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(_transform, false);
+            go.transform.localPosition = localPosition;
+            var renderer = go.AddComponent<SpriteRenderer>();
+            renderer.sprite = _tileSprite;
+            renderer.drawMode = SpriteDrawMode.Sliced;
+            renderer.sortingOrder = sortingOrder;
+            renderer.color = color;
+            return renderer;
         }
 
         private Vector3 CellToLocal(int index) => CellToLocal(_board.ToX(index), _board.ToY(index));

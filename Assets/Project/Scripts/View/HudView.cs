@@ -21,6 +21,16 @@ namespace BoardGame.View
         [SerializeField] private TMP_Text _iceText;
         [Tooltip("Optional: locked pieces left, shown only on levels that have locks.")]
         [SerializeField] private TMP_Text _lockText;
+        [Tooltip("Optional: a Filled image that grows toward the target score.")]
+        [SerializeField] private UnityEngine.UI.Image _progressFill;
+        [Tooltip("Moves left at or below this turn red and pulse.")]
+        [SerializeField, Min(0)] private int _lowMoves = 5;
+        [SerializeField] private Color _lowMovesColor = new Color(1f, 0.42f, 0.42f);
+
+        private float _shownProgress;
+        private float _movesPulse;        // 1 right after a move, decays to 0
+        private int _lastMovesLeft = -1;
+        private Color _movesColor;
 
         private ScoreKeeper _score;
         private LevelState _level;
@@ -37,6 +47,8 @@ namespace BoardGame.View
 
             _score = _boardView.Score;
             _level = _boardView.Level;
+            _movesColor = _movesText.color;
+            if (_progressFill != null) _progressFill.fillAmount = 0f;
             _score.OnChanged += Refresh;
             Refresh();
 
@@ -66,6 +78,26 @@ namespace BoardGame.View
             }
         }
 
+        // Smooth progress bar and the moves pulse; both settle and then cost almost nothing.
+        private void Update()
+        {
+            if (_score == null) return;
+
+            if (_progressFill != null)
+            {
+                float target = Mathf.Clamp01((float)_score.Score / _level.TargetScore);
+                _shownProgress = Mathf.MoveTowards(_shownProgress, target, Time.deltaTime * (0.4f + 2f * Mathf.Abs(target - _shownProgress)));
+                _progressFill.fillAmount = _shownProgress;
+            }
+
+            if (_movesPulse > 0f)
+            {
+                _movesPulse = Mathf.Max(0f, _movesPulse - Time.deltaTime * 4f);
+                float strength = _lastMovesLeft <= _lowMoves ? 0.3f : 0.15f;
+                _movesText.transform.localScale = Vector3.one * (1f + strength * Mathf.Sin(_movesPulse * Mathf.PI));
+            }
+        }
+
         private void RefreshLocks()
         {
             _lockText.SetText("Locks left {0}", (float)_boardView.LocksLeft);
@@ -90,7 +122,14 @@ namespace BoardGame.View
         {
             // Float arguments pick the formatting overload; (ReadOnlySpan<char>, int, int) would be a substring.
             _scoreText.SetText("Score {0} / {1}", (float)_score.Score, (float)_level.TargetScore);
-            _movesText.SetText("Moves left {0}", (float)_level.MovesLeft);
+            int movesLeft = _level.MovesLeft;
+            _movesText.SetText("Moves left {0}", (float)movesLeft);
+            if (movesLeft != _lastMovesLeft)
+            {
+                if (_lastMovesLeft >= 0) _movesPulse = 1f; // no pulse on the first refresh
+                _lastMovesLeft = movesLeft;
+                _movesText.color = movesLeft <= _lowMoves ? _lowMovesColor : _movesColor;
+            }
 
             bool showCombo = _score.Combo >= 2;
             if (showCombo) _comboText.SetText("Combo x{0}", (float)_score.Combo);

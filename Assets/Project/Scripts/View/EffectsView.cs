@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 
 namespace BoardGame.View
@@ -35,7 +36,36 @@ namespace BoardGame.View
 
         private AudioSource _sfx;           // fixed pitch
         private AudioSource _popSource;     // pitched up with the combo
+        private AudioSource _starSource;    // pitched up per star
         private AudioClip _popClip, _swapClip, _invalidClip, _rocketClip, _bombClip, _winClip, _loseClip;
+        private AudioClip _specialClip, _unlockClip, _iceClip, _starClip;
+        private int _iceSoundFrame = -1, _unlockSoundFrame = -1; // one of each per frame, however many cells
+
+        [Header("Screen shake")]
+        [Tooltip("Camera to shake; falls back to Camera.main.")]
+        [SerializeField] private Camera _camera;
+        private Transform _cameraTransform;
+        private Vector3 _cameraRest;
+        private float _shakeTime = -1f, _shakeDuration, _shakeStrength;
+
+        [Header("Score popups")]
+        [SerializeField, Min(0.1f)] private float _popupDuration = 0.85f;
+        [SerializeField] private float _popupRise = 1.1f;
+        [SerializeField] private float _popupSize = 7f;
+        private const int PopupCount = 10;
+        private TextMeshPro[] _popups;
+        private float[] _popupTime;
+        private Vector3[] _popupStart;
+        private int _nextPopup;
+        private static readonly Color[] ComboColors =
+        {
+            Color.white, new Color(1f, 0.9f, 0.3f), new Color(1f, 0.62f, 0.2f), new Color(1f, 0.4f, 0.55f), new Color(0.75f, 0.5f, 1f),
+        };
+        private static readonly Color[] ConfettiColors =
+        {
+            new Color(0.91f, 0.30f, 0.24f), new Color(0.95f, 0.77f, 0.06f), new Color(0.18f, 0.80f, 0.44f),
+            new Color(0.20f, 0.60f, 0.86f), new Color(0.61f, 0.35f, 0.71f), new Color(0.98f, 0.55f, 0.16f),
+        };
 
         private void Awake()
         {
@@ -58,8 +88,134 @@ namespace BoardGame.View
 
             _sfx = gameObject.AddComponent<AudioSource>();
             _popSource = gameObject.AddComponent<AudioSource>();
-            _sfx.playOnAwake = _popSource.playOnAwake = false;
+            _starSource = gameObject.AddComponent<AudioSource>();
+            _sfx.playOnAwake = _popSource.playOnAwake = _starSource.playOnAwake = false;
             BuildClips();
+
+            if (_camera == null) _camera = Camera.main;
+            if (_camera != null) _cameraTransform = _camera.transform;
+
+            _popups = new TextMeshPro[PopupCount];
+            _popupTime = new float[PopupCount];
+            _popupStart = new Vector3[PopupCount];
+            for (int i = 0; i < PopupCount; i++)
+            {
+                var go = new GameObject("ScorePopup" + i);
+                go.transform.SetParent(transform, false);
+                var text = go.AddComponent<TextMeshPro>();
+                text.alignment = TextAlignmentOptions.Center;
+                text.fontSize = _popupSize;
+                text.fontStyle = FontStyles.Bold;
+                text.outlineWidth = 0.22f;
+                text.outlineColor = new Color32(20, 18, 34, 255);
+                text.sortingOrder = 30;
+                text.enabled = false;
+                _popups[i] = text;
+                _popupTime[i] = -1f;
+            }
+        }
+
+        // ------------------------------------------------------------------ juice
+
+        /// <summary>Shakes the camera; a stronger shake overrides a weaker one still running.</summary>
+        public void Shake(float strength, float duration)
+        {
+            if (_cameraTransform == null) return;
+            if (_shakeTime >= 0f && strength < _shakeStrength * (1f - _shakeTime / _shakeDuration)) return;
+            if (_shakeTime < 0f) _cameraRest = _cameraTransform.position;
+            _shakeTime = 0f;
+            _shakeDuration = duration;
+            _shakeStrength = strength;
+        }
+
+        /// <summary>A "+points" label that pops up at <paramref name="worldPosition"/>, rises and fades.</summary>
+        public void ScorePopup(Vector3 worldPosition, int points, int combo)
+        {
+            int slot = _nextPopup;
+            _nextPopup = (_nextPopup + 1) % PopupCount;
+
+            TextMeshPro text = _popups[slot];
+            text.SetText("+{0}", (float)points);
+            text.color = ComboColors[Mathf.Clamp(combo - 1, 0, ComboColors.Length - 1)];
+            text.fontSize = _popupSize * (1f + 0.12f * Mathf.Clamp(combo - 1, 0, 5));
+            text.enabled = true;
+            _popupStart[slot] = worldPosition + new Vector3(0f, 0f, -1f);
+            _popupTime[slot] = 0f;
+            UpdatePopup(slot, 0f);
+        }
+
+        /// <summary>A shower of colored confetti from above <paramref name="center"/>.</summary>
+        public void Confetti(Vector3 center, float width, int count = 90)
+        {
+            if (_particles == null) return;
+            for (int i = 0; i < count; i++)
+            {
+                _emit.position = center + new Vector3(Random.Range(-0.5f, 0.5f) * width, Random.Range(0f, 1.5f), 0f);
+                _emit.velocity = new Vector3(Random.Range(-2.5f, 2.5f), Random.Range(3f, 8f), 0f);
+                _emit.startColor = ConfettiColors[Random.Range(0, ConfettiColors.Length)];
+                _emit.startSize = Random.Range(0.18f, 0.32f);
+                _emit.startLifetime = Random.Range(1.2f, 2f);
+                _particles.Emit(_emit, 1);
+            }
+        }
+
+        /// <summary>Confetti across the top of the view, for a win.</summary>
+        public void Celebrate()
+        {
+            if (_camera == null) return;
+            float halfHeight = _camera.orthographicSize;
+            Vector3 top = _cameraRestOrCurrent() + new Vector3(0f, halfHeight * 0.85f, 0f);
+            top.z = 0f;
+            Confetti(top, 2f * halfHeight * _camera.aspect, 140);
+        }
+
+        private Vector3 _cameraRestOrCurrent() => _shakeTime >= 0f ? _cameraRest : _cameraTransform.position;
+
+        private void UpdatePopup(int i, float t)
+        {
+            TextMeshPro text = _popups[i];
+            float rise = 1f - (1f - t) * (1f - t); // ease out
+            text.transform.position = _popupStart[i] + new Vector3(0f, _popupRise * rise, 0f);
+            float scale = t < 0.15f ? Mathf.Lerp(0.3f, 1.25f, t / 0.15f) : Mathf.Lerp(1.25f, 1f, Mathf.Min(1f, (t - 0.15f) / 0.15f));
+            text.transform.localScale = Vector3.one * scale;
+            Color color = text.color;
+            color.a = t < 0.6f ? 1f : 1f - (t - 0.6f) / 0.4f;
+            text.color = color;
+        }
+
+        private void LateUpdate()
+        {
+            float dt = Time.unscaledDeltaTime;
+            if (_shakeTime >= 0f && _cameraTransform != null)
+            {
+                _shakeTime += dt;
+                float t = _shakeTime / _shakeDuration;
+                if (t >= 1f)
+                {
+                    _shakeTime = -1f;
+                    _cameraTransform.position = _cameraRest;
+                }
+                else
+                {
+                    float falloff = (1f - t) * (1f - t);
+                    Vector2 offset = Random.insideUnitCircle * (_shakeStrength * falloff);
+                    _cameraTransform.position = _cameraRest + new Vector3(offset.x, offset.y, 0f);
+                }
+            }
+
+            for (int i = 0; i < PopupCount; i++)
+            {
+                if (_popupTime[i] < 0f) continue;
+                _popupTime[i] += Time.deltaTime;
+                float t = _popupTime[i] / _popupDuration;
+                if (t >= 1f)
+                {
+                    _popupTime[i] = -1f;
+                    _popups[i].enabled = false;
+                    continue;
+                }
+                UpdatePopup(i, t);
+            }
         }
 
         // ------------------------------------------------------------------ visual effects
@@ -178,6 +334,29 @@ namespace BoardGame.View
             Play(_popSource, _popClip, 0.9f);
         }
 
+        public void PlaySpecialCreated() => Play(_sfx, _specialClip, 0.8f);
+
+        public void PlayUnlock()
+        {
+            if (_unlockSoundFrame == Time.frameCount) return;
+            _unlockSoundFrame = Time.frameCount;
+            Play(_sfx, _unlockClip, 0.8f);
+        }
+
+        public void PlayIce()
+        {
+            if (_iceSoundFrame == Time.frameCount) return;
+            _iceSoundFrame = Time.frameCount;
+            Play(_sfx, _iceClip, 0.8f);
+        }
+
+        /// <summary>Star reveal on the results card: each earned star rings a step higher.</summary>
+        public void PlayStar(int index)
+        {
+            _starSource.pitch = 1f + 0.26f * index;
+            Play(_starSource, _starClip, 0.9f);
+        }
+
         public void PlaySwap() => Play(_sfx, _swapClip, 0.6f);
         public void PlayInvalid() => Play(_sfx, _invalidClip, 0.7f);
         public void PlayOutcome(bool won) => Play(_sfx, won ? _winClip : _loseClip, 1f);
@@ -198,9 +377,31 @@ namespace BoardGame.View
             _bombClip = Synth("Bomb", 0.55f, 130f, 38f, 0.5f, 6f, noise);
             _winClip = Arpeggio("Win", new[] { 523.25f, 659.25f, 783.99f, 1046.5f });
             _loseClip = Arpeggio("Lose", new[] { 392f, 329.63f, 261.63f, 196f });
+            _specialClip = Chime("Special", new[] { 1046.5f, 1318.5f, 1568f }, 0.45f);
+            _unlockClip = Synth("Unlock", 0.12f, 2400f, 1800f, 0.35f, 24f, noise, square: true);
+            _iceClip = Synth("Ice", 0.16f, 3200f, 900f, 0.8f, 20f, noise);
+            _starClip = Chime("Star", new[] { 880f, 1760f }, 0.6f);
         }
 
-        private static AudioClip Synth(string name, float seconds, float startHz, float endHz, float noiseAmount,
+        // Bell-like: a few sine partials sharing one soft attack and long decay.
+        private static AudioClip Chime(string name, float[] partialsHz, float seconds)
+        {
+            int count = Mathf.CeilToInt(seconds * SampleRate);
+            var data = new float[count];
+            for (int i = 0; i < count; i++)
+            {
+                float t = (float)i / SampleRate;
+                float envelope = Mathf.Exp(-t * 7f) * Mathf.Min(1f, i / (0.003f * SampleRate));
+                float sum = 0f;
+                for (int p = 0; p < partialsHz.Length; p++) sum += Mathf.Sin(2f * Mathf.PI * partialsHz[p] * t) / (p + 1);
+                data[i] = sum * envelope * 0.35f;
+            }
+            var clip = AudioClip.Create(name, count, 1, SampleRate, false);
+            clip.SetData(data, 0);
+            return clip;
+        }
+
+        internal static AudioClip Synth(string name, float seconds, float startHz, float endHz, float noiseAmount,
                                        float decay, System.Random noise, bool square = false)
         {
             int count = Mathf.CeilToInt(seconds * SampleRate);

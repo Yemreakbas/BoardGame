@@ -48,7 +48,15 @@ namespace BoardGame.View
             Landing,
             Popping,
             Hinting,
+            Punching,
         }
+
+        private const float PunchDuration = 0.28f;
+        private const float PunchScale = 0.45f;
+        private const float PressedScale = 1.12f;
+
+        private float _delay;          // seconds a move waits before starting (staggered level intro)
+        private bool _pressed;         // finger down on this piece: shown slightly larger while idle
 
         private Transform _transform;
         private Phase _phase;
@@ -88,6 +96,7 @@ namespace BoardGame.View
             _transform.localPosition = localPosition;
             _target = localPosition;
             _returnPending = false;
+            _pressed = false;
             SetIdle();
         }
 
@@ -147,10 +156,27 @@ namespace BoardGame.View
         /// Glides to <paramref name="localTarget"/>. Can be retargeted mid-flight: the new move starts from
         /// wherever the view is.
         /// </summary>
-        public void MoveTo(Vector3 localTarget, MoveStyle style = MoveStyle.Swap)
+        public void MoveTo(Vector3 localTarget, MoveStyle style = MoveStyle.Swap, float delay = 0f)
         {
             _returnPending = false;
             BeginMove(localTarget, style);
+            _delay = delay;
+        }
+
+        /// <summary>A quick swell-and-settle, e.g. when this piece turns into a special.</summary>
+        public void Punch()
+        {
+            if (_phase == Phase.Moving || _phase == Phase.Popping) return; // never interrupt travel or a pop
+            _phase = Phase.Punching;
+            _time = 0f;
+            enabled = true;
+        }
+
+        /// <summary>Finger down / up on this piece. Only shows while the piece is at rest.</summary>
+        public void SetPressed(bool pressed)
+        {
+            _pressed = pressed;
+            if (_phase == Phase.Idle) _transform.localScale = Vector3.one * (pressed ? PressedScale : 1f);
         }
 
         /// <summary>Glides to <paramref name="localTarget"/> and straight back: the rejected-swap bounce.</summary>
@@ -173,13 +199,14 @@ namespace BoardGame.View
             _duration = (style == MoveStyle.Fall ? _fallDuration : _swapDuration) * Mathf.Sqrt(distance);
             _phase = Phase.Moving;
             _time = 0f;
+            _delay = 0f;
             enabled = true;
         }
 
         private void SetIdle()
         {
             _phase = Phase.Idle;
-            if (_transform != null) _transform.localScale = Vector3.one;
+            if (_transform != null) _transform.localScale = Vector3.one * (_pressed ? PressedScale : 1f);
             enabled = false;
         }
 
@@ -194,8 +221,28 @@ namespace BoardGame.View
                     _transform.localScale = Vector3.one * (1f + _hintScale * wave);
                     break;
                 }
+                case Phase.Punching:
+                {
+                    float t = _time / PunchDuration;
+                    if (t >= 1f)
+                    {
+                        SetIdle();
+                        break;
+                    }
+                    // Fast swell, then a damped wobble back to rest.
+                    float s = t < 0.25f ? PunchScale * (t / 0.25f)
+                                        : PunchScale * Mathf.Cos((t - 0.25f) / 0.75f * Mathf.PI * 1.5f) * (1f - t);
+                    _transform.localScale = Vector3.one * (1f + s);
+                    break;
+                }
                 case Phase.Moving:
                 {
+                    if (_delay > 0f)
+                    {
+                        _delay -= Time.deltaTime;
+                        _time = 0f; // hold at the start until the delay runs out
+                        break;
+                    }
                     float t = Mathf.Clamp01(_time / _duration);
                     float eased = _style == MoveStyle.Fall ? t * t : t * t * (3f - 2f * t); // gravity / smoothstep
                     _transform.localPosition = Vector3.LerpUnclamped(_from, _target, eased);

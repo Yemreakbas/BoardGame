@@ -33,6 +33,14 @@ namespace BoardGame.View
 
         private LevelState _level;
 
+        // Star reveal: stars pop in one after another once the card has sprung open (unscaled time).
+        private const float FirstStarDelay = 0.45f;
+        private const float StarInterval = 0.32f;
+        private const float StarPopDuration = 0.3f;
+        private float _revealTime = -1f;
+        private int _starsEarned;
+        private int _starsRevealed;
+
         private void Awake()
         {
             if (_panel != null) _panel.SetActive(false);
@@ -73,8 +81,12 @@ namespace BoardGame.View
             for (int i = 0; i < _stars.Length; i++)
             {
                 _stars[i].enabled = won;
-                _stars[i].color = i < stars ? _starEarned : _starEmpty;
+                _stars[i].color = _starEmpty;              // earned ones light up during the reveal
+                _stars[i].transform.localScale = Vector3.zero;
             }
+            _starsEarned = stars;
+            _starsRevealed = 0;
+            _revealTime = won ? 0f : -1f;
 
             if (!won) _titleText.SetText("Out of Moves");
             else if (finishedAll) _titleText.SetText("All Levels Complete!");
@@ -92,7 +104,39 @@ namespace BoardGame.View
             }
 
             _panel.SetActive(true);
-            if (_effects != null) _effects.PlayOutcome(won);
+            if (_effects != null)
+            {
+                _effects.PlayOutcome(won);
+                if (won) _effects.Celebrate();
+            }
+        }
+
+        private void Update()
+        {
+            if (_revealTime < 0f) return;
+            _revealTime += Time.unscaledDeltaTime;
+
+            bool running = false;
+            for (int i = 0; i < _stars.Length; i++)
+            {
+                float t = (_revealTime - FirstStarDelay - i * StarInterval) / StarPopDuration;
+                if (t < 0f) { running = true; continue; }
+
+                if (i >= _starsRevealed)
+                {
+                    _starsRevealed = i + 1;
+                    bool earned = i < _starsEarned;
+                    _stars[i].color = earned ? _starEarned : _starEmpty;
+                    if (earned && _effects != null) _effects.PlayStar(i);
+                }
+
+                // Pop past full size and settle; earned stars pop bigger.
+                float peak = i < _starsEarned ? 1.45f : 1.1f;
+                float scale = t >= 1f ? 1f : t < 0.5f ? Mathf.Lerp(0f, peak, t / 0.5f) : Mathf.Lerp(peak, 1f, (t - 0.5f) / 0.5f);
+                _stars[i].transform.localScale = Vector3.one * scale;
+                if (t < 1f) running = true;
+            }
+            if (!running) _revealTime = -1f;
         }
 
         // The level to load was already chosen in Show: the next one after a win, the same one after a loss.
