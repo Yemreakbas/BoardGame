@@ -134,6 +134,48 @@ namespace BoardGame.Core.Logic
         }
 
         /// <summary>
+        /// Replaces the opening board with a designed layout (same indexing as the board). Non-empty entries
+        /// are placed as given; <see cref="Empty"/> entries get random pieces that complete no run. Setup only:
+        /// call before <see cref="SetLocked"/> and <see cref="FinishSetup"/> (which shuffles the board if the
+        /// layout leaves no move). On any exception the board is unchanged. Allocation-free.
+        /// </summary>
+        /// <exception cref="ArgumentException">The layout has the wrong length, holds anything but empty cells
+        /// and plain colors, or already contains a match.</exception>
+        /// <exception cref="InvalidOperationException">The board is resolving or has locks, or the empty cells
+        /// cannot be filled without a match (leave more of them empty, or use more colors).</exception>
+        public void LoadLayout(int[] layout)
+        {
+            if (layout == null) throw new ArgumentNullException(nameof(layout));
+            if (IsResolving) throw new InvalidOperationException("A layout can only be loaded on a stable board.");
+            if (LockCount > 0) throw new InvalidOperationException("Load the layout before placing locks.");
+            if (layout.Length != _cells.Length)
+            {
+                throw new ArgumentException($"The layout has {layout.Length} cells; the board has {_cells.Length}.", nameof(layout));
+            }
+
+            for (int i = 0; i < layout.Length; i++)
+            {
+                int piece = layout[i];
+                if (piece != Empty && piece != Piece.ColorOf(piece))
+                {
+                    throw new ArgumentException($"Cell {i} holds {piece}; a layout may only hold empty cells and plain colors.",
+                                                nameof(layout));
+                }
+            }
+            if (MatchDetector.FindMatches(layout, Width, Height) > 0)
+            {
+                throw new ArgumentException("The layout already contains a match.", nameof(layout));
+            }
+
+            Span<int> filled = stackalloc int[_cells.Length]; // at most GlobalBuffer.MaxCellCount ints
+            if (!_generator.FillAround(layout, filled, Width, Height))
+            {
+                throw new InvalidOperationException("The layout's empty cells cannot be filled without creating a match.");
+            }
+            filled.CopyTo(_cells);
+        }
+
+        /// <summary>
         /// Call after placing ice and locks: locks can leave the opening board without a single move, in
         /// which case it is shuffled silently (locked pieces keep their locks).
         /// </summary>

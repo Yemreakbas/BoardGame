@@ -10170,6 +10170,7 @@ MonoBehaviour:
   _catalog: {fileID: 11400000, guid: ab12c48a9309fc44bbc7f4fcc6a24150, type: 2}
   _moveLimit: 20
   _targetScore: 2500
+  _layout: {fileID: 0}
   _piecePrefab: {fileID: 6370913756041358673, guid: 8daa8a80b075be043b0055e739e77f98, type: 3}
   _effects: {fileID: 155297228}
   _flyer: {fileID: 1440411243}

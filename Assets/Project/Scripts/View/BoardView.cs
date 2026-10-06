@@ -1,5 +1,6 @@
 using System;
 using BoardGame.Core.Logic;
+using BoardGame.Data;
 using BoardGame.Levels;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -59,6 +60,9 @@ namespace BoardGame.View
         [SerializeField] private LevelCatalog _catalog;
         [SerializeField, Min(1)] private int _moveLimit = 20;
         [SerializeField, Min(1)] private int _targetScore = 2500;
+        [Tooltip("Optional hand-made opening board (Window > Match-3 > Level Editor). Its size overrides the " +
+                 "board/level size, and empty cells are filled with random pieces. Applies to every level.")]
+        [SerializeField] private LevelData _layout;
 
         [Header("Presentation")]
         [SerializeField] private PieceView _piecePrefab;
@@ -168,9 +172,15 @@ namespace BoardGame.View
                 targetScore = level.TargetScore;
                 seed = level.Seed;
             }
+            if (_layout != null)
+            {
+                width = _layout.Width;
+                height = _layout.Height;
+            }
             if (seed == 0) seed = Environment.TickCount;
 
             _board = new Board(width, height, new BoardGenerator(colors, seed));
+            if (_layout != null) ApplyLayout();
             if (level != null && level.HasIce)
             {
                 int[] ice = level.BuildIce();
@@ -513,6 +523,20 @@ namespace BoardGame.View
                 if (_hiddenViews[i].IsBusy) return true;
             }
             return false;
+        }
+
+        // Puts the designer's layout on the freshly generated board. A bad layout keeps the generated board,
+        // so a broken asset never stops the game from starting.
+        private void ApplyLayout()
+        {
+            try
+            {
+                _board.LoadLayout(_layout.Cells);
+            }
+            catch (Exception e) when (e is ArgumentException || e is InvalidOperationException)
+            {
+                Debug.LogError($"Layout '{_layout.name}' was not applied: {e.Message} Using a random board instead.", _layout);
+            }
         }
 
         // Centres the camera on the board and picks the smallest orthographic size that shows the whole
